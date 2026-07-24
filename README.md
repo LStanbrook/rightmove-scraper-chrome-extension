@@ -25,11 +25,12 @@ everything to an Excel file.
     Tesseract.js - no external service, no API key) and looks for a
     "NNN sq ft" figure on it. This only works when the floorplan actually
     states a total (some, especially stylised marketing floorplans, don't)
-    and OCR isn't perfect, so estimated values are written as e.g.
-    "916 sq. ft. (est. from floorplan)" - clearly marked, never blended in
-    silently as if it were Rightmove's own figure - and feed into Price per
-    Sq Ft and the "size" ranking the same way a real size would. It also
-    adds a few real seconds of processing per listing that needs it.
+    and OCR isn't perfect, so the result goes into its own "Size (OCR est.,
+    sq ft)" column rather than into "Size" itself - it's always visible
+    which listings got a real Rightmove figure versus an OCR guess. It's
+    still used as a fallback for Price per Sq Ft and the "size" ranking
+    when "Size" is blank. Adds a few real seconds of processing per listing
+    that needs it.
 - Rightmove caps how many results can actually be paged through (roughly
   1,000, regardless of your total match count). To get everything, narrow
   the search below ~1,000 results - e.g. split by price band, bedrooms, or
@@ -45,7 +46,8 @@ everything to an Excel file.
   calculated once at scrape time and baked in, so changing the postcode
   after scraping (without re-scraping) updates the distance column
   immediately instead of silently continuing to show distance from a
-  stale or absent reference point.
+  stale or absent reference point. The postcode is remembered between
+  popup opens, so it doesn't need re-entering every time.
 - "Rank by importance" gives distance / size / price / bedrooms / bathrooms
   (that default order/weighting) each a 0-10 slider, visualized as a live
   pie chart, to get a 0-100% "Score" column so you can sort listings by what
@@ -67,13 +69,17 @@ everything to an Excel file.
     small influence - so a listing 9km away with an otherwise-perfect
     score scores ~13% overall if distance is half your ranking, but ~76%
     if distance is only a twentieth of it.
-  - Price is weighted on a curve relative to the rest of the batch: a
-    listing merely a bit pricier than the cheapest barely loses score,
-    while one way over loses a lot more. Price/bedrooms/bathrooms/size are
-    all scored this way - relative to what's actually on offer in this
-    search, clamped to roughly the 5th-95th percentile so one freak
-    outlier (e.g. a parking space at a tenth of everyone else's price)
-    can't skew the scale for every other listing.
+  - Price/bedrooms/bathrooms/size are scored by percentile rank within the
+    batch (what fraction of listings this value beats), not min-max - a
+    single freak outlier (e.g. a parking space at a tenth of everyone
+    else's price) just takes the top or bottom rank without dragging
+    anyone else's rank with it, so it can't compress or flatten everyone
+    else's score the way min-max scaling would. It also means every
+    distinct value gets its own distinct score - e.g. weighting only size
+    spreads the biggest properties out across the top of the range instead
+    of many of them tying at 100%. Price is additionally weighted on a
+    curve: a listing merely a bit pricier than the cheapest barely loses
+    score, while one way over loses a lot more.
   - Distance instead uses a fixed decay from the actual km value (score
     halves every 1.5km: 0km=100%, 1.5km=50%, 3km=25%, 6km=6%), rather than
     being relative to the batch. A relative curve doesn't work for

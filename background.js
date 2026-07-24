@@ -146,6 +146,7 @@ function normalizeProperty(p) {
     propertyType: p.propertySubType || '',
     tenure: (p.tenure && p.tenure.tenureType) || '',
     size: p.displaySize || '',
+    sizeOcrSqFt: '',
     councilTaxBand: '',
     epcRating: '',
     groundRent: '',
@@ -380,13 +381,14 @@ async function scrapeOneDetail(tabId, row, detailFields, attempt = 1) {
       if (detailFields.serviceCharge) row.serviceCharge = result.serviceCharge;
 
       // Slow (real OCR) and imperfect, so opt-in only, and only attempted
-      // when there's genuinely no size figure to fall back from. Flagged
-      // in the value itself ("est. from floorplan") rather than silently
-      // blended in, so it's never mistaken for Rightmove's own figure.
+      // when there's genuinely no size figure to fall back from. Written to
+      // its own column (sizeOcrSqFt) rather than into size itself, so it's
+      // never mistaken for Rightmove's own figure - popup.js still uses it
+      // as a fallback for ranking/Price per Sq Ft when size is blank.
       if (detailFields.floorplanSize && !row.size && result.floorplanUrl) {
         try {
           const sqft = await ocrFloorplanSqFt(result.floorplanUrl);
-          if (sqft) row.size = `${sqft} sq. ft. (est. from floorplan)`;
+          if (sqft) row.sizeOcrSqFt = sqft;
         } catch (e) {
           state.log.push(`Floorplan size estimate failed for ${row.url}: ${e.message}`);
         }

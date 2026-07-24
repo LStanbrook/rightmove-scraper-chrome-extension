@@ -152,6 +152,7 @@ const BUY_COLUMNS = [
   ['groundRent', 'Ground Rent'],
   ['serviceCharge', 'Service Charge'],
   ['size', 'Size'],
+  ['sizeOcrSqFt', 'Size (OCR est., sq ft)', true],
   ['pricePerBedroom', 'Price per Bedroom', true],
   ['pricePerBathroom', 'Price per Bathroom', true],
   ['pricePerSqFt', 'Price per Sq Ft', true],
@@ -173,6 +174,7 @@ const RENT_COLUMNS = [
   ['propertyType', 'Property Type'],
   ['letAvailableDate', 'Let Available Date'],
   ['size', 'Size'],
+  ['sizeOcrSqFt', 'Size (OCR est., sq ft)', true],
   ['pricePerBedroom', 'Price per Bedroom', true],
   ['pricePerBathroom', 'Price per Bathroom', true],
   ['pricePerSqFt', 'Price per Sq Ft', true],
@@ -190,6 +192,14 @@ function parseSizeSqFt(sizeStr) {
   if (!sizeStr) return null;
   const m = String(sizeStr).replace(/,/g, '').match(/(\d+(?:\.\d+)?)/);
   return m ? parseFloat(m[1]) : null;
+}
+
+// Rightmove's own size, falling back to the floorplan-OCR estimate (its
+// own column - see sizeOcrSqFt) only when there's no real figure at all.
+function sizeSqFt(row) {
+  const fromText = parseSizeSqFt(row.size);
+  if (fromText !== null) return fromText;
+  return typeof row.sizeOcrSqFt === 'number' ? row.sizeOcrSqFt : null;
 }
 
 // ---- Suitability score: combine several differently-scaled metrics into
@@ -219,7 +229,7 @@ const RANK_METRICS = {
   price: { key: 'price', better: 'lower', curve: 2 },
   bedrooms: { key: 'bedrooms', better: 'higher' },
   bathrooms: { key: 'bathrooms', better: 'higher' },
-  size: { key: 'size', better: 'higher', parse: parseSizeSqFt },
+  size: { key: 'size', better: 'higher', resolve: sizeSqFt },
   distanceKm: { key: 'distanceKm', decayHalfKm: 1.5 },
 };
 const METRIC_ORDER = ['distanceKm', 'size', 'price', 'bedrooms', 'bathrooms'];
@@ -233,6 +243,10 @@ const METRIC_COLORS = {
 const WEIGHT_STORAGE_KEY = 'rmScraperWeights';
 
 function numericValue(row, metric) {
+  if (metric.resolve) {
+    const resolved = metric.resolve(row);
+    return resolved === null || resolved === undefined || Number.isNaN(resolved) ? null : resolved;
+  }
   const raw = row[metric.key];
   if (raw === '' || raw === null || raw === undefined) return null;
   const parsed = metric.parse ? metric.parse(raw) : Number(raw);
@@ -254,6 +268,21 @@ function sliderFor(metricKey) {
 let refCoords = null; // { latitude, longitude } for refPostcodeKey, once resolved
 let refPostcodeKey = ''; // normalized postcode refCoords corresponds to (or is resolving for)
 let refCoordsSeq = 0; // guards a stale in-flight lookup from overwriting a newer one
+
+const REF_POSTCODE_STORAGE_KEY = 'rmScraperRefPostcode';
+
+function saveRefPostcode() {
+  localStorage.setItem(REF_POSTCODE_STORAGE_KEY, refPostcodeInput.value);
+}
+
+function loadRefPostcode() {
+  try {
+    const saved = localStorage.getItem(REF_POSTCODE_STORAGE_KEY);
+    if (saved) refPostcodeInput.value = saved;
+  } catch (e) {
+    // ignore
+  }
+}
 
 function haversineKm(lat1, lon1, lat2, lon2) {
   const R = 6371;
@@ -320,23 +349,38 @@ function getWeights() {
   });
 }
 
-// Linear-interpolated percentile of an already-sorted numeric array.
-function percentile(sortedValues, p) {
-  const idx = (sortedValues.length - 1) * p;
-  const lo = Math.floor(idx);
-  const hi = Math.ceil(idx);
-  if (lo === hi) return sortedValues[lo];
-  return sortedValues[lo] + (sortedValues[hi] - sortedValues[lo]) * (idx - lo);
+// This value's percentile rank (0..1) within an already-sorted numeric
+// array, using mid-rank tie handling - tied values share the average rank
+// of their tie group, so e.g. several identical 2-bedroom listings all
+// score identically rather than an arbitrary order-dependent split.
+//
+// Used instead of min-max normalization because min-max needs an outlier
+// safeguard (clamping to e.g. the 5th-95th percentile) to stop one freak
+// value from stretching the whole scale and compressing everyone else
+// toward "looks perfect" - but that clamp then ties every value beyond it
+// to the same score, flattening exactly the extreme (biggest/cheapest/etc)
+// listings someone weighting that trait heavily cares most about
+// differentiating. Percentile rank has neither problem: an outlier just
+// takes the top or bottom rank without dragging anyone else's rank with
+// it, and every distinct value still gets its own distinct rank - no
+// clamp, no plateau.
+function percentileRank(sortedValues, v) {
+  let countLess = 0;
+  let countEqual = 0;
+  for (const x of sortedValues) {
+    if (x < v) countLess++;
+    else if (x === v) countEqual++;
+  }
+  return (countLess + 0.5 * countEqual) / sortedValues.length;
 }
 
-// Min-max normalizes each metric across the given rows (so "best of what's
-// actually on offer" scores 100%, "worst" scores 0%), then combines them
-// into one 0-100 score per row using a weighted GEOMETRIC mean (not a
-// plain average - see below). A row missing a metric or two (e.g. no
-// bathrooms figure) just has those excluded rather than being penalised
-// for them. Every row with at least one known ranked metric still gets
-// included and scored (see the coverage blend below) - nothing gets
-// dropped from the ranking.
+// Ranks each metric across the given rows (percentile rank - see above),
+// then combines them into one 0-100 score per row using a weighted
+// GEOMETRIC mean (not a plain average - see below). A row missing a
+// metric or two (e.g. no bathrooms figure) just has those excluded rather
+// than being penalised for them. Every row with at least one known ranked
+// metric still gets included and scored (see the coverage blend below) -
+// nothing gets dropped from the ranking.
 //
 // Geometric, not arithmetic: with a plain weighted average, a metric at
 // (say) 50% weight can never pull the total below 50 if everything else
@@ -352,17 +396,13 @@ function computeScores(rows, weights) {
   if (!active.length) return rows.map(() => null);
   const totalWeight = active.reduce((sum, w) => sum + w.weight, 0);
 
-  // Min/max taken from the 5th-95th percentile rather than the true
-  // extremes, so a single freak outlier (e.g. a Β£15k parking space
-  // dragging price all the way down) can't stretch the whole scale and
-  // make every normal listing look artificially close to "perfect".
-  // Values outside that band are clamped to it rather than dropped.
-  // (Not used for distance - see decayHalfKm above.)
-  const ranges = {};
+  // (Not used for distance - see decayHalfKm above, which has its own
+  // fixed, non-relative scale.)
+  const sortedValues = {};
   for (const w of active) {
     if (w.decayHalfKm) continue;
     const values = rows.map((r) => numericValue(r, w)).filter((v) => v !== null).sort((a, b) => a - b);
-    ranges[w.key] = values.length ? { min: percentile(values, 0.05), max: percentile(values, 0.95) } : null;
+    sortedValues[w.key] = values.length ? values : null;
   }
 
   return rows.map((row) => {
@@ -375,10 +415,9 @@ function computeScores(rows, weights) {
       if (w.decayHalfKm) {
         norm = Math.pow(0.5, Math.max(0, v) / w.decayHalfKm);
       } else {
-        const range = ranges[w.key];
-        if (!range) continue;
-        const clamped = Math.min(range.max, Math.max(range.min, v));
-        norm = range.max === range.min ? 0.5 : (clamped - range.min) / (range.max - range.min);
+        const sorted = sortedValues[w.key];
+        if (!sorted) continue;
+        norm = percentileRank(sorted, v);
         if (w.better === 'lower') norm = 1 - norm;
         if (w.curve && w.curve !== 1) {
           // norm is "goodness" here (1 = best) - curve the "badness" tail
@@ -481,10 +520,12 @@ weightListEl.querySelectorAll('.weight-slider').forEach((input) => {
 });
 refPostcodeInput.addEventListener('input', () => {
   refreshRefCoords();
+  saveRefPostcode();
   updateWeightDisplay();
   renderTopMatches();
 });
 loadWeights();
+loadRefPostcode();
 refreshRefCoords();
 updateWeightDisplay();
 
@@ -533,7 +574,7 @@ function withDerivedFields(row) {
   const price = Number(row.price) || null;
   const bedrooms = Number(row.bedrooms) || null;
   const bathrooms = Number(row.bathrooms) || null;
-  const sqft = parseSizeSqFt(row.size);
+  const sqft = sizeSqFt(row);
   return {
     ...row,
     pricePerBedroom: price && bedrooms ? Math.round(price / bedrooms) : '',
