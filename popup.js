@@ -92,22 +92,24 @@ stopBtn.addEventListener('click', () => {
 
 // Rental exports get letAvailableDate instead of tenure/ground rent/service
 // charge, which don't apply when you're renting rather than buying.
+// Third element (isNumber) tells the xlsx writer to write the cell as a
+// real number rather than text, so Excel sorts/formats it correctly.
 const BUY_COLUMNS = [
-  ['suitabilityScore', 'Suitability Score'],
+  ['score', 'Score', true],
   ['address', 'Address'],
-  ['distanceKm', 'Distance (km)'],
-  ['price', 'Price'],
+  ['distanceKm', 'Distance (km)', true],
+  ['price', 'Price', true],
   ['priceQualifier', 'Price Qualifier'],
-  ['bedrooms', 'Bedrooms'],
-  ['bathrooms', 'Bathrooms'],
+  ['bedrooms', 'Bedrooms', true],
+  ['bathrooms', 'Bathrooms', true],
   ['propertyType', 'Property Type'],
   ['tenure', 'Tenure'],
   ['groundRent', 'Ground Rent'],
   ['serviceCharge', 'Service Charge'],
   ['size', 'Size'],
-  ['pricePerBedroom', 'Price per Bedroom'],
-  ['pricePerBathroom', 'Price per Bathroom'],
-  ['pricePerSqFt', 'Price per Sq Ft'],
+  ['pricePerBedroom', 'Price per Bedroom', true],
+  ['pricePerBathroom', 'Price per Bathroom', true],
+  ['pricePerSqFt', 'Price per Sq Ft', true],
   ['councilTaxBand', 'Council Tax Band'],
   ['epcRating', 'EPC Rating'],
   ['agent', 'Agent'],
@@ -116,19 +118,19 @@ const BUY_COLUMNS = [
 ];
 
 const RENT_COLUMNS = [
-  ['suitabilityScore', 'Suitability Score'],
+  ['score', 'Score', true],
   ['address', 'Address'],
-  ['distanceKm', 'Distance (km)'],
-  ['price', 'Price'],
+  ['distanceKm', 'Distance (km)', true],
+  ['price', 'Price', true],
   ['priceQualifier', 'Price Qualifier'],
-  ['bedrooms', 'Bedrooms'],
-  ['bathrooms', 'Bathrooms'],
+  ['bedrooms', 'Bedrooms', true],
+  ['bathrooms', 'Bathrooms', true],
   ['propertyType', 'Property Type'],
   ['letAvailableDate', 'Let Available Date'],
   ['size', 'Size'],
-  ['pricePerBedroom', 'Price per Bedroom'],
-  ['pricePerBathroom', 'Price per Bathroom'],
-  ['pricePerSqFt', 'Price per Sq Ft'],
+  ['pricePerBedroom', 'Price per Bedroom', true],
+  ['pricePerBathroom', 'Price per Bathroom', true],
+  ['pricePerSqFt', 'Price per Sq Ft', true],
   ['councilTaxBand', 'Council Tax Band'],
   ['epcRating', 'EPC Rating'],
   ['agent', 'Agent'],
@@ -153,15 +155,17 @@ function parseSizeSqFt(sizeStr) {
 // accelerates instead of scaling linearly - e.g. going from 2km to 4km away
 // costs more score than going from 0km to 2km did. 1 (or omitted) is plain
 // linear; higher values are more forgiving in the middle of the range but
-// hit the far/worst end of it much harder. Distance is curved more sharply
-// than price so genuinely far-away listings take a real hit while nearby
-// ones are barely penalised for being slightly further than the closest.
+// hit the far/worst end of it much harder. Kept fairly gentle (rather than
+// a steeper exponent) because too aggressive a curve crushes every "close"
+// listing's score toward the same ~100, making genuinely different nearby
+// distances indistinguishable - the goal is to punish the far tail harder,
+// not to flatten out the resolution among the listings that matter most.
 const RANK_METRICS = {
   price: { key: 'price', better: 'lower', curve: 2 },
   bedrooms: { key: 'bedrooms', better: 'higher' },
   bathrooms: { key: 'bathrooms', better: 'higher' },
   size: { key: 'size', better: 'higher', parse: parseSizeSqFt },
-  distanceKm: { key: 'distanceKm', better: 'lower', curve: 3 },
+  distanceKm: { key: 'distanceKm', better: 'lower', curve: 1.5 },
 };
 const METRIC_ORDER = ['distanceKm', 'size', 'price', 'bedrooms', 'bathrooms'];
 const METRIC_COLORS = {
@@ -267,7 +271,11 @@ function computeScores(rows, weights) {
     const raw = weightedSum / weightTotal;
     const coverage = weightTotal / totalWeight;
     const blended = raw * coverage + 0.5 * (1 - coverage);
-    return Math.round(blended * 100);
+    // Left unrounded here so sorting (CSV, Top Matches, Open Top 10) can
+    // still tell apart listings that round to the same displayed
+    // percentage but aren't actually tied - round only where the score is
+    // shown or exported.
+    return blended * 100;
   });
 }
 
@@ -375,7 +383,7 @@ function renderTopMatches() {
   topMatchesEl.classList.remove('hidden');
   topMatchesEl.innerHTML =
     '<div>Top matches with current ranking:</div><ol>' +
-    top.map((s) => `<li>${s.score}% - ${escapeHtml(s.row.address)}</li>`).join('') +
+    top.map((s) => `<li>${Math.round(s.score)}% - ${escapeHtml(s.row.address)}</li>`).join('') +
     '</ol>';
 }
 
@@ -395,20 +403,23 @@ function withDerivedFields(row) {
   };
 }
 
-function toCSV(rows, channel) {
-  if (!rows.length) return '';
+// Builds the exportable rows for the current ranking, best (highest score)
+// first - unscored listings (no ranking weights active at all) sort last
+// rather than being dropped.
+function buildExportRows(rows, channel) {
   const columns = channel === 'RENT' ? RENT_COLUMNS : BUY_COLUMNS;
   const scores = computeScores(rows, getWeights());
-  const esc = (v) => {
-    const s = (v ?? '').toString();
-    return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
-  };
-  const lines = [columns.map(([, label]) => esc(label)).join(',')];
-  rows.forEach((r, i) => {
-    const derived = { ...withDerivedFields(r), suitabilityScore: scores[i] ?? '' };
-    lines.push(columns.map(([key]) => esc(derived[key])).join(','));
+  const withScores = rows.map((r, i) => ({
+    score: scores[i],
+    derived: { ...withDerivedFields(r), score: scores[i] === null ? '' : Math.round(scores[i]) },
+  }));
+  withScores.sort((a, b) => {
+    if (a.score === null && b.score === null) return 0;
+    if (a.score === null) return 1;
+    if (b.score === null) return -1;
+    return b.score - a.score;
   });
-  return lines.join('\r\n');
+  return { columns, rows: withScores.map((w) => w.derived) };
 }
 
 openTopBtn.addEventListener('click', () => {
@@ -428,16 +439,13 @@ downloadBtn.addEventListener('click', () => {
     const state = resp && resp.state;
     const rows = state ? state.rows : [];
     if (!rows.length) return;
-    const csv = '﻿' + toCSV(rows, state.channel);
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const { columns, rows: exportRows } = buildExportRows(rows, state.channel);
+    const blob = buildXlsx(columns, exportRows);
     const url = URL.createObjectURL(blob);
     const date = new Date().toISOString().slice(0, 10);
-    // Kept short and free of punctuation Excel/Sheets might mangle when
-    // auto-naming the worksheet tab from the filename (sheet names are
-    // capped at 31 characters and reject several special characters).
     chrome.downloads.download({
       url,
-      filename: `Rightmove results ${date}.csv`,
+      filename: `Rightmove results ${date}.xlsx`,
       saveAs: true,
     });
   });
