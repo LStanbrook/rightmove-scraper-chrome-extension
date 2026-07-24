@@ -24,12 +24,15 @@ everything to CSV.
   Bedroom/Bathroom/Sq Ft.
 - Optionally enter a UK postcode under "Distance from" to add a straight-line
   "Distance (km)" column.
-- "Rank by importance" gives price / bedrooms / bathrooms / size / distance
-  each a 0-10 slider, visualized as a live pie chart, to get a 0-100%
-  "Suitability Score" column so you can sort listings by what actually
-  matters to you - not just the order of importance, but by how much (e.g.
-  price mattering twice as much as bedrooms). Drag a slider to 0 to drop
-  that trait from the ranking entirely. Price and
+- "Rank by importance" gives distance / size / price / bedrooms / bathrooms
+  (that default order/weighting) each a 0-10 slider, visualized as a live
+  pie chart, to get a 0-100% "Suitability Score" column so you can sort
+  listings by what actually matters to you - not just the order of
+  importance, but by how much (e.g. price mattering twice as much as
+  bedrooms). Drag a slider to 0 to drop that trait from the ranking
+  entirely. Distance's slider is greyed out and left out of the pie
+  until a "Distance from" postcode is set, since it can't affect
+  anything without one. Price and
   distance are weighted on a curve rather than linearly, so a listing that's
   merely a bit pricier or a bit further barely loses score, while one that's
   way over on either loses a lot more - the penalty accelerates the further

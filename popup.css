@@ -135,6 +135,10 @@ h1 {
   font-variant-numeric: tabular-nums;
 }
 
+.weight-list li.inactive {
+  opacity: 0.45;
+}
+
 .score-box > .hint {
   display: block;
   color: #777;

@@ -36,9 +36,7 @@ function render(state) {
   refPostcodeInput.disabled = state.running;
   refLocationRow.classList.toggle('disabled', state.running);
   weightPanelEl.classList.toggle('disabled', state.running);
-  weightListEl.querySelectorAll('.weight-slider').forEach((input) => {
-    input.disabled = state.running;
-  });
+  updateWeightDisplay();
 
   if (state.running) {
     progressWrap.classList.remove('hidden');
@@ -165,7 +163,7 @@ const RANK_METRICS = {
   size: { key: 'size', better: 'higher', parse: parseSizeSqFt },
   distanceKm: { key: 'distanceKm', better: 'lower', curve: 3 },
 };
-const METRIC_ORDER = ['price', 'bedrooms', 'bathrooms', 'size', 'distanceKm'];
+const METRIC_ORDER = ['distanceKm', 'size', 'price', 'bedrooms', 'bathrooms'];
 const METRIC_COLORS = {
   price: '#00805e',
   bedrooms: '#1a4fbb',
@@ -186,11 +184,22 @@ function sliderFor(metricKey) {
   return weightListEl.querySelector(`input[data-metric="${metricKey}"]`);
 }
 
+// Distance is meaningless without a reference postcode - every row's
+// distanceKm is blank in that case, so the metric can never actually
+// affect a score. Rather than let its slider quietly do nothing, its
+// weight is forced to 0 (and the slider/pie/label greyed out) until a
+// postcode is entered, regardless of wherever the slider itself is set.
+function isDistanceUsable() {
+  return refPostcodeInput.value.trim() !== '';
+}
+
 function getWeights() {
-  return METRIC_ORDER.map((metricKey) => ({
-    ...RANK_METRICS[metricKey],
-    weight: Number(sliderFor(metricKey).value) || 0,
-  }));
+  const distanceUsable = isDistanceUsable();
+  return METRIC_ORDER.map((metricKey) => {
+    const sliderValue = Number(sliderFor(metricKey).value) || 0;
+    const weight = metricKey === 'distanceKm' && !distanceUsable ? 0 : sliderValue;
+    return { ...RANK_METRICS[metricKey], weight };
+  });
 }
 
 // Linear-interpolated percentile of an already-sorted numeric array.
@@ -283,16 +292,29 @@ function loadWeights() {
 }
 
 // Redraws the pie chart (a conic-gradient sized by each slider's share of
-// the total) and the "X%" label next to each slider.
+// the total), the "X%" label next to each slider, and the disabled/greyed
+// state of the distance slider (only usable once a postcode is entered).
 function updateWeightDisplay() {
+  const distanceUsable = isDistanceUsable();
+  const running = !!(lastState && lastState.running);
+  weightListEl.querySelectorAll('.weight-slider').forEach((input) => {
+    input.disabled = running || (input.dataset.metric === 'distanceKm' && !distanceUsable);
+  });
+  const distanceLi = weightListEl.querySelector('li[data-metric="distanceKm"]');
+  if (distanceLi) distanceLi.classList.toggle('inactive', !distanceUsable);
+
   const weights = getWeights();
   const total = weights.reduce((sum, w) => sum + w.weight, 0);
   let angle = 0;
   const stops = [];
   weights.forEach((w) => {
-    const pct = total > 0 ? Math.round((w.weight / total) * 100) : 0;
     const pctEl = weightListEl.querySelector(`li[data-metric="${w.key}"] .weight-pct`);
-    if (pctEl) pctEl.textContent = pct + '%';
+    if (w.key === 'distanceKm' && !distanceUsable) {
+      if (pctEl) pctEl.textContent = '–';
+    } else if (pctEl) {
+      const pct = total > 0 ? Math.round((w.weight / total) * 100) : 0;
+      pctEl.textContent = pct + '%';
+    }
     if (w.weight > 0 && total > 0) {
       const start = angle;
       angle += (w.weight / total) * 360;
@@ -312,6 +334,10 @@ weightListEl.querySelectorAll('.weight-slider').forEach((input) => {
     saveWeights();
     renderTopMatches();
   });
+});
+refPostcodeInput.addEventListener('input', () => {
+  updateWeightDisplay();
+  renderTopMatches();
 });
 loadWeights();
 updateWeightDisplay();
