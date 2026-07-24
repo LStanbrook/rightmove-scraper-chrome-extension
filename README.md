@@ -10,8 +10,9 @@ everything to an Excel file.
   for every listing card. The extension reads that directly instead of
   scraping visible text, and pages through the rest of the results the same
   way in the background.
-- Ticking "Also fetch full details" additionally opens a few hidden windows
-  (count set by "Parallel windows") to pull fields that only exist on each
+- Ticking "Fetch full details" additionally opens a few hidden windows
+  (count set by "Parallel windows", which only appears once that's ticked -
+  it has no effect otherwise) to pull fields that only exist on each
   listing's own page - council tax band, EPC rating, ground rent, service
   charge. This is slower since it's a real page load per listing; if Chrome
   gets sluggish, lower "Parallel windows".

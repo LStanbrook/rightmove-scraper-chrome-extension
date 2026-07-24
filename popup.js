@@ -21,6 +21,15 @@ const weightPanelEl = document.querySelector('.weight-panel');
 
 let lastState = null;
 
+// "Parallel windows" only matters when "Also fetch full details" is on -
+// it's meaningless otherwise, since the fast scrape never opens any hidden
+// windows at all. Keep it out of the way until it's relevant.
+function updateConcurrencyVisibility() {
+  concurrencyRow.classList.toggle('hidden', !deepToggle.checked);
+}
+deepToggle.addEventListener('change', updateConcurrencyVisibility);
+updateConcurrencyVisibility();
+
 function render(state) {
   if (!state) return;
   lastState = state;
@@ -528,14 +537,29 @@ openTopBtn.addEventListener('click', () => {
   });
 });
 
+// A blob: URL is scoped to this popup document - if the native "Save As"
+// dialog (saveAs: true, below) steals focus, Chrome closes the popup, which
+// can revoke the blob URL before the download manager finishes reading it.
+// That's read as "nothing happened" and needed a retry or two. A data: URL
+// isn't tied to any document's lifetime, so it survives the popup closing.
+async function blobToDataUrl(blob) {
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  let binary = '';
+  const chunkSize = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+  }
+  return `data:${blob.type};base64,${btoa(binary)}`;
+}
+
 downloadBtn.addEventListener('click', () => {
-  chrome.runtime.sendMessage({ type: 'GET_STATE' }, (resp) => {
+  chrome.runtime.sendMessage({ type: 'GET_STATE' }, async (resp) => {
     const state = resp && resp.state;
     const rows = state ? state.rows : [];
     if (!rows.length) return;
     const { columns, rows: exportRows } = buildExportRows(rows, state.channel);
     const blob = buildXlsx(columns, exportRows);
-    const url = URL.createObjectURL(blob);
+    const url = await blobToDataUrl(blob);
     const date = new Date().toISOString().slice(0, 10);
     chrome.downloads.download({
       url,
