@@ -150,14 +150,16 @@ function parseSizeSqFt(sizeStr) {
 // `curve` bends the penalty for the "bad" end of a metric's range so it
 // accelerates instead of scaling linearly - e.g. going from 2km to 4km away
 // costs more score than going from 0km to 2km did. 1 (or omitted) is plain
-// linear; higher values punish the bad end more sharply. Applied to price
-// and distance since both have long, punishing tails.
+// linear; higher values are more forgiving in the middle of the range but
+// hit the far/worst end of it much harder. Distance is curved more sharply
+// than price so genuinely far-away listings take a real hit while nearby
+// ones are barely penalised for being slightly further than the closest.
 const RANK_METRICS = {
   price: { key: 'price', better: 'lower', curve: 2 },
   bedrooms: { key: 'bedrooms', better: 'higher' },
   bathrooms: { key: 'bathrooms', better: 'higher' },
   size: { key: 'size', better: 'higher', parse: parseSizeSqFt },
-  distanceKm: { key: 'distanceKm', better: 'lower', curve: 2 },
+  distanceKm: { key: 'distanceKm', better: 'lower', curve: 3 },
 };
 const RANK_ORDER_STORAGE_KEY = 'rmScraperRankOrder';
 

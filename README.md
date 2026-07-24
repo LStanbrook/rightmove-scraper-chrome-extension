@@ -30,7 +30,10 @@ everything to CSV.
   distance are weighted on a curve rather than linearly, so a listing that's
   merely a bit pricier or a bit further barely loses score, while one that's
   way over on either loses a lot more - the penalty accelerates the further
-  out it gets, rather than scaling evenly step for step. Every listing stays
+  out it gets, rather than scaling evenly step for step. Distance is curved
+  more aggressively than price, so nearby listings are barely penalised for
+  being a little further than the closest, but genuinely far-away ones take
+  a real hit. Every listing stays
   in the ranking, but one missing most of what you're ranking by (e.g. a
   parking space with no bedrooms/bathrooms/size) has its score pulled
   toward a neutral 50% in proportion to how much is missing, so it can't
