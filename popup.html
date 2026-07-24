@@ -11,33 +11,61 @@
 
   <label class="ref-location">
     Distance from:
-    <input type="text" id="refPostcode" placeholder="e.g. EC2A 4BX" />
+    <input type="text" id="refPostcode" placeholder="e.g. BA11 5HT" />
     <span class="hint">optional - UK postcode. Adds a straight-line distance (km) column</span>
   </label>
 
   <div class="score-box">
-    <div class="score-title">Rank by importance <span class="hint">(drag to reorder, most important first)</span></div>
-    <ul id="rankList" class="rank-list">
-      <li draggable="true" data-metric="price"><span class="rank-num">1</span>Cheaper price</li>
-      <li draggable="true" data-metric="bedrooms"><span class="rank-num">2</span>More bedrooms</li>
-      <li draggable="true" data-metric="bathrooms"><span class="rank-num">3</span>More bathrooms</li>
-      <li draggable="true" data-metric="size"><span class="rank-num">4</span>More size</li>
-      <li draggable="true" data-metric="distanceKm"><span class="rank-num">5</span>Closer distance</li>
-    </ul>
-    <div class="hint">needs a "Distance from" postcode above to have any effect</div>
+    <div class="score-title">Rank by importance <span class="hint">(drag each slider - size shows relative importance)</span></div>
+    <div class="weight-panel">
+      <div id="weightPie" class="weight-pie" aria-hidden="true"></div>
+      <ul id="weightList" class="weight-list">
+        <li data-metric="price">
+          <span class="weight-swatch"></span>
+          <span class="weight-label">Cheaper price</span>
+          <input type="range" class="weight-slider" data-metric="price" min="0" max="10" value="5" />
+          <span class="weight-pct">0%</span>
+        </li>
+        <li data-metric="bedrooms">
+          <span class="weight-swatch"></span>
+          <span class="weight-label">More bedrooms</span>
+          <input type="range" class="weight-slider" data-metric="bedrooms" min="0" max="10" value="5" />
+          <span class="weight-pct">0%</span>
+        </li>
+        <li data-metric="bathrooms">
+          <span class="weight-swatch"></span>
+          <span class="weight-label">More bathrooms</span>
+          <input type="range" class="weight-slider" data-metric="bathrooms" min="0" max="10" value="5" />
+          <span class="weight-pct">0%</span>
+        </li>
+        <li data-metric="size">
+          <span class="weight-swatch"></span>
+          <span class="weight-label">More size</span>
+          <input type="range" class="weight-slider" data-metric="size" min="0" max="10" value="5" />
+          <span class="weight-pct">0%</span>
+        </li>
+        <li data-metric="distanceKm">
+          <span class="weight-swatch"></span>
+          <span class="weight-label">Closer distance</span>
+          <input type="range" class="weight-slider" data-metric="distanceKm" min="0" max="10" value="5" />
+          <span class="weight-pct">0%</span>
+        </li>
+      </ul>
+    </div>
+    <div class="hint">drag a slider to 0 to ignore that trait. Distance needs a "Distance from" postcode above to have any effect</div>
     <div id="topMatches" class="top-matches hidden"></div>
   </div>
 
   <label class="deep-toggle">
     <input type="checkbox" id="deepToggle" />
-    Also fetch full details (tenure, council tax band, EPC, service charge)
-    <span class="hint">slower - briefly opens each listing in a hidden window</span>
+    Fetch full details (tenure, council tax band, EPC, service charge)
+    <span class="hint"> much slower - briefly opens each listing in a hidden window</span>
   </label>
 
   <label class="concurrency-row">
     Parallel windows:
     <input type="number" id="concurrencyInput" min="1" max="10" value="4" />
-    <span class="hint">lower this if Chrome becomes sluggish or unresponsive during a scrape</span>
+    <span class="hint">lower this if Chrome becomes sluggish or unresponsive</span>
   </label>
 
   <div class="buttons">

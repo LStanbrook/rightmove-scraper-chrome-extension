@@ -15,7 +15,9 @@ const progressText = document.getElementById('progressText');
 const noteEl = document.getElementById('note');
 const logEl = document.getElementById('log');
 const topMatchesEl = document.getElementById('topMatches');
-const rankListEl = document.getElementById('rankList');
+const weightListEl = document.getElementById('weightList');
+const weightPieEl = document.getElementById('weightPie');
+const weightPanelEl = document.querySelector('.weight-panel');
 
 let lastState = null;
 
@@ -33,8 +35,10 @@ function render(state) {
   concurrencyRow.classList.toggle('disabled', state.running);
   refPostcodeInput.disabled = state.running;
   refLocationRow.classList.toggle('disabled', state.running);
-  rankListEl.classList.toggle('disabled', state.running);
-  rankListEl.querySelectorAll('li').forEach((li) => li.setAttribute('draggable', state.running ? 'false' : 'true'));
+  weightPanelEl.classList.toggle('disabled', state.running);
+  weightListEl.querySelectorAll('.weight-slider').forEach((input) => {
+    input.disabled = state.running;
+  });
 
   if (state.running) {
     progressWrap.classList.remove('hidden');
@@ -144,9 +148,9 @@ function parseSizeSqFt(sizeStr) {
 }
 
 // ---- Suitability score: combine several differently-scaled metrics into
-// one ranking number, based on the drag-and-drop order (most important
-// first). Order is turned into weights linearly - with 5 metrics, 1st place
-// counts 5x as much as 5th place, 2nd place 4x, and so on. ----
+// one ranking number, weighted by the 0-10 sliders in the popup (visualized
+// as a pie chart - slice size is relative importance). A slider at 0 drops
+// that metric out of the ranking entirely. ----
 // `curve` bends the penalty for the "bad" end of a metric's range so it
 // accelerates instead of scaling linearly - e.g. going from 2km to 4km away
 // costs more score than going from 0km to 2km did. 1 (or omitted) is plain
@@ -161,7 +165,15 @@ const RANK_METRICS = {
   size: { key: 'size', better: 'higher', parse: parseSizeSqFt },
   distanceKm: { key: 'distanceKm', better: 'lower', curve: 3 },
 };
-const RANK_ORDER_STORAGE_KEY = 'rmScraperRankOrder';
+const METRIC_ORDER = ['price', 'bedrooms', 'bathrooms', 'size', 'distanceKm'];
+const METRIC_COLORS = {
+  price: '#00805e',
+  bedrooms: '#1a4fbb',
+  bathrooms: '#7a3ec7',
+  size: '#d97706',
+  distanceKm: '#dc2626',
+};
+const WEIGHT_STORAGE_KEY = 'rmScraperWeights';
 
 function numericValue(row, metric) {
   const raw = row[metric.key];
@@ -170,14 +182,15 @@ function numericValue(row, metric) {
   return parsed === null || Number.isNaN(parsed) ? null : parsed;
 }
 
-function getRankOrder() {
-  return Array.from(rankListEl.querySelectorAll('li')).map((li) => li.dataset.metric);
+function sliderFor(metricKey) {
+  return weightListEl.querySelector(`input[data-metric="${metricKey}"]`);
 }
 
 function getWeights() {
-  const order = getRankOrder();
-  const n = order.length;
-  return order.map((metricKey, i) => ({ ...RANK_METRICS[metricKey], weight: n - i }));
+  return METRIC_ORDER.map((metricKey) => ({
+    ...RANK_METRICS[metricKey],
+    weight: Number(sliderFor(metricKey).value) || 0,
+  }));
 }
 
 // Linear-interpolated percentile of an already-sorted numeric array.
@@ -249,65 +262,59 @@ function computeScores(rows, weights) {
   });
 }
 
-function saveRankOrder() {
-  localStorage.setItem(RANK_ORDER_STORAGE_KEY, JSON.stringify(getRankOrder()));
+function saveWeights() {
+  const obj = {};
+  METRIC_ORDER.forEach((metricKey) => {
+    obj[metricKey] = Number(sliderFor(metricKey).value) || 0;
+  });
+  localStorage.setItem(WEIGHT_STORAGE_KEY, JSON.stringify(obj));
 }
 
-function loadRankOrder() {
+function loadWeights() {
   try {
-    const saved = JSON.parse(localStorage.getItem(RANK_ORDER_STORAGE_KEY) || 'null');
-    if (!Array.isArray(saved)) return;
-    for (const metricKey of saved) {
-      const li = rankListEl.querySelector(`li[data-metric="${metricKey}"]`);
-      if (li) rankListEl.appendChild(li);
-    }
+    const saved = JSON.parse(localStorage.getItem(WEIGHT_STORAGE_KEY) || 'null');
+    if (!saved || typeof saved !== 'object') return;
+    METRIC_ORDER.forEach((metricKey) => {
+      if (typeof saved[metricKey] === 'number') sliderFor(metricKey).value = saved[metricKey];
+    });
   } catch (e) {
     // ignore
   }
 }
 
-function updateRankNumbers() {
-  rankListEl.querySelectorAll('li').forEach((li, i) => {
-    li.querySelector('.rank-num').textContent = i + 1;
+// Redraws the pie chart (a conic-gradient sized by each slider's share of
+// the total) and the "X%" label next to each slider.
+function updateWeightDisplay() {
+  const weights = getWeights();
+  const total = weights.reduce((sum, w) => sum + w.weight, 0);
+  let angle = 0;
+  const stops = [];
+  weights.forEach((w) => {
+    const pct = total > 0 ? Math.round((w.weight / total) * 100) : 0;
+    const pctEl = weightListEl.querySelector(`li[data-metric="${w.key}"] .weight-pct`);
+    if (pctEl) pctEl.textContent = pct + '%';
+    if (w.weight > 0 && total > 0) {
+      const start = angle;
+      angle += (w.weight / total) * 360;
+      stops.push(`${METRIC_COLORS[w.key]} ${start}deg ${angle}deg`);
+    }
   });
+  weightPieEl.style.background = stops.length ? `conic-gradient(${stops.join(', ')})` : '#eee';
 }
 
-function getDragAfterElement(y) {
-  const items = [...rankListEl.querySelectorAll('li:not(.dragging)')];
-  return items.reduce(
-    (closest, child) => {
-      const box = child.getBoundingClientRect();
-      const offset = y - box.top - box.height / 2;
-      if (offset < 0 && offset > closest.offset) return { offset, element: child };
-      return closest;
-    },
-    { offset: Number.NEGATIVE_INFINITY, element: null }
-  ).element;
-}
-
-let draggingEl = null;
-rankListEl.querySelectorAll('li').forEach((li) => {
-  li.addEventListener('dragstart', () => {
-    draggingEl = li;
-    li.classList.add('dragging');
-  });
-  li.addEventListener('dragend', () => {
-    li.classList.remove('dragging');
-    draggingEl = null;
-    updateRankNumbers();
-    saveRankOrder();
+weightListEl.querySelectorAll('li').forEach((li) => {
+  const swatch = li.querySelector('.weight-swatch');
+  if (swatch) swatch.style.background = METRIC_COLORS[li.dataset.metric];
+});
+weightListEl.querySelectorAll('.weight-slider').forEach((input) => {
+  input.addEventListener('input', () => {
+    updateWeightDisplay();
+    saveWeights();
     renderTopMatches();
   });
 });
-rankListEl.addEventListener('dragover', (e) => {
-  e.preventDefault();
-  if (!draggingEl) return;
-  const after = getDragAfterElement(e.clientY);
-  if (after == null) rankListEl.appendChild(draggingEl);
-  else rankListEl.insertBefore(draggingEl, after);
-});
-loadRankOrder();
-updateRankNumbers();
+loadWeights();
+updateWeightDisplay();
 
 function escapeHtml(s) {
   return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));

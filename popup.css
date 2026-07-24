@@ -60,51 +60,79 @@ h1 {
   font-size: 11px;
 }
 
-.rank-list {
-  list-style: none;
-  margin: 0 0 4px;
-  padding: 0;
-}
-
-.rank-list li {
+.weight-panel {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 6px 8px;
-  margin-bottom: 4px;
-  background: #f7f7f7;
-  border: 1px solid #ddd;
-  border-radius: 4px;
-  cursor: grab;
-  font-size: 12px;
-  user-select: none;
+  gap: 10px;
 }
 
-.rank-list li:active {
-  cursor: grabbing;
-}
-
-.rank-list li.dragging {
-  opacity: 0.4;
-}
-
-.rank-list.disabled li {
+.weight-panel.disabled {
   opacity: 0.5;
+}
+
+.weight-panel.disabled .weight-slider {
   cursor: not-allowed;
 }
 
-.rank-num {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 18px;
-  height: 18px;
+.weight-pie {
+  position: relative;
+  width: 76px;
+  height: 76px;
+  flex: 0 0 auto;
   border-radius: 50%;
-  background: #00805e;
-  color: white;
+  background: #eee;
+}
+
+.weight-pie::after {
+  content: "";
+  position: absolute;
+  inset: 16px;
+  border-radius: 50%;
+  background: #fff;
+}
+
+.weight-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  flex: 1;
+  min-width: 0;
+}
+
+.weight-list li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
   font-size: 11px;
-  font-weight: 600;
-  flex-shrink: 0;
+}
+
+.weight-swatch {
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  flex: 0 0 auto;
+}
+
+.weight-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.weight-slider {
+  flex: 0 0 auto;
+  width: 64px;
+}
+
+.weight-pct {
+  flex: 0 0 auto;
+  width: 26px;
+  text-align: right;
+  color: #555;
+  font-variant-numeric: tabular-nums;
 }
 
 .score-box > .hint {
