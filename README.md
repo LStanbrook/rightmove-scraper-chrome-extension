@@ -24,7 +24,12 @@ everything to an Excel file.
   Bedroom/Bathroom/Sq Ft. The exported rows are sorted by "Score" (best
   first) rather than scrape order.
 - Optionally enter a UK postcode under "Distance from" to add a straight-line
-  "Distance (km)" column.
+  "Distance (km)" column. Distance is (re)computed live from whatever
+  postcode is currently in that box, every time it's needed - it's not
+  calculated once at scrape time and baked in, so changing the postcode
+  after scraping (without re-scraping) updates the distance column
+  immediately instead of silently continuing to show distance from a
+  stale or absent reference point.
 - "Rank by importance" gives distance / size / price / bedrooms / bathrooms
   (that default order/weighting) each a 0-10 slider, visualized as a live
   pie chart, to get a 0-100% "Score" column so you can sort listings by what

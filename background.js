@@ -101,32 +101,7 @@ async function runPool(count, concurrency, worker) {
   await Promise.all(Array.from({ length: Math.min(concurrency, count) }, runner));
 }
 
-// Straight-line ("as the crow flies") distance in km - not a driving or
-// walking distance, which would need a routing API rather than just two
-// coordinates.
-function haversineKm(lat1, lon1, lat2, lon2) {
-  const R = 6371;
-  const toRad = (d) => (d * Math.PI) / 180;
-  const dLat = toRad(lat2 - lat1);
-  const dLon = toRad(lon2 - lon1);
-  const a =
-    Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-}
-
-// Free, no-API-key UK postcode lookup - resolves a postcode straight to
-// coordinates so listings can be compared against a reference location
-// (e.g. an office) without needing a full geocoding service.
-async function geocodePostcode(postcode) {
-  const clean = (postcode || '').trim().replace(/\s+/g, '');
-  if (!clean) return null;
-  const res = await fetch(`https://api.postcodes.io/postcodes/${encodeURIComponent(clean)}`);
-  const data = await res.json();
-  if (!res.ok || !data.result) throw new Error(`postcode "${postcode}" not found`);
-  return { latitude: data.result.latitude, longitude: data.result.longitude };
-}
-
-function normalizeProperty(p, refCoords) {
+function normalizeProperty(p) {
   const priceInfo = (p.price && p.price.displayPrices && p.price.displayPrices[0]) || {};
   const displayPrice = priceInfo.displayPrice || '';
   // Rightmove's "amount" field still holds a placeholder number even when
@@ -138,18 +113,21 @@ function normalizeProperty(p, refCoords) {
   const price = priceLooksNumeric && p.price ? p.price.amount : '';
   const priceQualifier = priceLooksNumeric ? priceInfo.displayPriceQualifier || '' : displayPrice;
 
-  let distanceKm = '';
-  if (refCoords && p.location && typeof p.location.latitude === 'number') {
-    distanceKm = haversineKm(
-      refCoords.latitude,
-      refCoords.longitude,
-      p.location.latitude,
-      p.location.longitude
-    ).toFixed(1);
-  }
+  // Raw coordinates only - NOT a distance-from-reference-point figure.
+  // That's deliberately computed later, live in the popup from whatever
+  // postcode is currently entered (see withLiveDistance in popup.js), not
+  // baked in here at scrape time. Baking it in here meant it went stale -
+  // still showing distance from whatever postcode (or none) was set
+  // during the scrape - if the "Distance from" box was changed afterwards
+  // without re-scraping.
+  const lat = p.location && typeof p.location.latitude === 'number' ? p.location.latitude : null;
+  const lon = p.location && typeof p.location.longitude === 'number' ? p.location.longitude : null;
+
   return {
     address: p.displayAddress || '',
-    distanceKm,
+    lat,
+    lon,
+    distanceKm: '',
     price,
     priceQualifier,
     bedrooms: p.bedrooms ?? '',
@@ -188,11 +166,11 @@ async function fetchSearchResultsAtIndex(baseUrl, index) {
   return data?.props?.pageProps?.searchResults || null;
 }
 
-async function scrapeAllPages(firstSearchResults, pageUrl, refCoords) {
+async function scrapeAllPages(firstSearchResults, pageUrl) {
   const byId = new Map();
   const addAll = (sr) => {
     for (const p of sr.properties || []) {
-      if (!byId.has(p.id)) byId.set(p.id, normalizeProperty(p, refCoords));
+      if (!byId.has(p.id)) byId.set(p.id, normalizeProperty(p));
     }
   };
   addAll(firstSearchResults);
@@ -459,15 +437,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         return;
       }
 
-      let refCoords = null;
-      if (msg.referencePostcode) {
-        try {
-          refCoords = await geocodePostcode(msg.referencePostcode);
-        } catch (e) {
-          state.log.push(`Distance column skipped: ${e.message}`);
-        }
-      }
-
       // The tab's own __NEXT_DATA__ is a snapshot from whenever the page last
       // fully loaded - if filters/sort changed since then via Rightmove's
       // client-side routing, the on-screen count moves on but this embedded
@@ -486,7 +455,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         state.log.push('Could not refresh results from the network - falling back to the page\'s own data, which may be stale if filters changed since it last fully loaded.');
       }
 
-      await scrapeAllPages(firstSearchResults, resp.url, refCoords);
+      await scrapeAllPages(firstSearchResults, resp.url);
 
       if (msg.deep && state.running) {
         await deepScrapeAll(msg.detailConcurrency);

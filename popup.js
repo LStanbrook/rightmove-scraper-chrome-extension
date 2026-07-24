@@ -77,12 +77,10 @@ chrome.runtime.sendMessage({ type: 'GET_STATE' }, (resp) => {
 
 startBtn.addEventListener('click', () => {
   const detailConcurrency = Math.max(1, Math.min(10, Number(concurrencyInput.value) || 4));
-  const referencePostcode = refPostcodeInput.value.trim();
   chrome.runtime.sendMessage({
     type: 'START_SCRAPE',
     deep: deepToggle.checked,
     detailConcurrency,
-    referencePostcode,
   });
 });
 
@@ -198,13 +196,72 @@ function sliderFor(metricKey) {
   return weightListEl.querySelector(`input[data-metric="${metricKey}"]`);
 }
 
-// Distance is meaningless without a reference postcode - every row's
-// distanceKm is blank in that case, so the metric can never actually
-// affect a score. Rather than let its slider quietly do nothing, its
-// weight is forced to 0 (and the slider/pie/label greyed out) until a
-// postcode is entered, regardless of wherever the slider itself is set.
+// ---- Live distance-from-postcode ----
+// Deliberately NOT computed once at scrape time and baked into each row -
+// that went stale (still showing distance from whatever postcode, or none,
+// was active during the scrape) if "Distance from" was changed afterwards
+// without re-scraping, which could silently show a wildly wrong km figure.
+// Instead each row keeps raw lat/lon from Rightmove, and distance is
+// (re)computed here from the currently-entered postcode every time it's
+// needed, the same way the suitability score is already live.
+let refCoords = null; // { latitude, longitude } for refPostcodeKey, once resolved
+let refPostcodeKey = ''; // normalized postcode refCoords corresponds to (or is resolving for)
+let refCoordsSeq = 0; // guards a stale in-flight lookup from overwriting a newer one
+
+function haversineKm(lat1, lon1, lat2, lon2) {
+  const R = 6371;
+  const toRad = (d) => (d * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+// Re-resolves refCoords whenever the postcode box changes. Runs async in
+// the background - callers just read whatever's currently cached (null
+// while unresolved), and re-render once it settles.
+function refreshRefCoords() {
+  const key = refPostcodeInput.value.trim().toUpperCase().replace(/\s+/g, '');
+  if (key === refPostcodeKey) return;
+  refPostcodeKey = key;
+  refCoords = null;
+  const seq = ++refCoordsSeq;
+  if (!key) return;
+  fetch(`https://api.postcodes.io/postcodes/${encodeURIComponent(key)}`)
+    .then((res) => res.json().then((data) => ({ ok: res.ok, data })))
+    .then(({ ok, data }) => {
+      if (seq !== refCoordsSeq) return; // a newer postcode has since been entered
+      if (!ok || !data.result) throw new Error('not found');
+      refCoords = { latitude: data.result.latitude, longitude: data.result.longitude };
+    })
+    .catch(() => {
+      if (seq !== refCoordsSeq) return;
+      refCoords = null;
+    })
+    .finally(() => {
+      if (seq !== refCoordsSeq) return;
+      updateWeightDisplay();
+      renderTopMatches();
+    });
+}
+
+// Distance is meaningless without a successfully-resolved reference
+// postcode - rather than let its slider quietly do nothing, its weight is
+// forced to 0 (and the slider/pie/label greyed out) until one resolves,
+// regardless of wherever the slider itself is set.
 function isDistanceUsable() {
-  return refPostcodeInput.value.trim() !== '';
+  return !!refCoords;
+}
+
+// Returns a copy of rows with distanceKm freshly computed from the current
+// refCoords, overriding whatever (if anything) was there before.
+function withLiveDistance(rows) {
+  return rows.map((row) => {
+    if (!refCoords || typeof row.lat !== 'number' || typeof row.lon !== 'number') {
+      return { ...row, distanceKm: '' };
+    }
+    return { ...row, distanceKm: haversineKm(refCoords.latitude, refCoords.longitude, row.lat, row.lon).toFixed(1) };
+  });
 }
 
 function getWeights() {
@@ -376,10 +433,12 @@ weightListEl.querySelectorAll('.weight-slider').forEach((input) => {
   });
 });
 refPostcodeInput.addEventListener('input', () => {
+  refreshRefCoords();
   updateWeightDisplay();
   renderTopMatches();
 });
 loadWeights();
+refreshRefCoords();
 updateWeightDisplay();
 
 function escapeHtml(s) {
@@ -389,6 +448,7 @@ function escapeHtml(s) {
 // Ranks the given rows by current suitability weights, best first, dropping
 // any with no score (missing every ranked metric).
 function getRankedRows(rows) {
+  rows = withLiveDistance(rows);
   const scores = computeScores(rows, getWeights());
   return rows
     .map((row, i) => ({ row, score: scores[i] }))
@@ -440,6 +500,7 @@ function withDerivedFields(row) {
 // rather than being dropped.
 function buildExportRows(rows, channel) {
   const columns = channel === 'RENT' ? RENT_COLUMNS : BUY_COLUMNS;
+  rows = withLiveDistance(rows);
   const scores = computeScores(rows, getWeights());
   const withScores = rows.map((r, i) => ({
     score: scores[i],
