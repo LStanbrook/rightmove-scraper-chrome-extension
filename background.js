@@ -224,10 +224,8 @@ async function scrapeAllPages(firstSearchResults, pageUrl, refCoords) {
   if (state.resultCount > state.rows.length + 5) {
     state.note =
       `Rightmove reports ${state.resultCount.toLocaleString()} total matches, but only exposes ` +
-      `${state.rows.length.toLocaleString()} of them through pagination. This is a fixed ceiling Rightmove ` +
-      `applies to any search over roughly 1,000 results - it doesn't scale with how far over you are, so ` +
-      `narrowing from e.g. 1,490 to 1,019 still hits it. To get everything, the search needs to come in ` +
-      `under ~1,000 matches (try splitting by price band, bedrooms, or area and running a scrape per slice).`;
+      `${state.rows.length.toLocaleString()} through pagination (its ~1,000-result cap). Narrow the ` +
+      `search below ~1,000 matches to get everything.`;
   }
 }
 
@@ -470,7 +468,25 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         }
       }
 
-      await scrapeAllPages(resp.searchResults, resp.url, refCoords);
+      // The tab's own __NEXT_DATA__ is a snapshot from whenever the page last
+      // fully loaded - if filters/sort changed since then via Rightmove's
+      // client-side routing, the on-screen count moves on but this embedded
+      // copy doesn't, so its result count and listings can be stale. Refetch
+      // page 0 fresh over the network (same as every later page) so the
+      // whole scrape is built from one consistent, up-to-date source. Fall
+      // back to the tab's snapshot only if that refetch itself fails.
+      let firstSearchResults;
+      try {
+        firstSearchResults = await fetchSearchResultsAtIndex(resp.url, 0);
+      } catch (e) {
+        firstSearchResults = null;
+      }
+      if (!firstSearchResults) {
+        firstSearchResults = resp.searchResults;
+        state.log.push('Could not refresh results from the network - falling back to the page\'s own data, which may be stale if filters changed since it last fully loaded.');
+      }
+
+      await scrapeAllPages(firstSearchResults, resp.url, refCoords);
 
       if (msg.deep && state.running) {
         await deepScrapeAll(msg.detailConcurrency);
