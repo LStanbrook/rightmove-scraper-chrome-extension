@@ -22,7 +22,8 @@ everything to an Excel file.
 - Columns differ slightly for sale vs. rental searches (e.g. tenure vs. let
   available date), and every export includes computed Price per
   Bedroom/Bathroom/Sq Ft. The exported rows are sorted by "Score" (best
-  first) rather than scrape order.
+  first) rather than scrape order. The URL column is a real clickable
+  hyperlink, not just plain text.
 - Optionally enter a UK postcode under "Distance from" to add a straight-line
   "Distance (km)" column. Distance is (re)computed live from whatever
   postcode is currently in that box, every time it's needed - it's not

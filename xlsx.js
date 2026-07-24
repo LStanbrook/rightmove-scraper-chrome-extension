@@ -116,31 +116,54 @@ function xlsxBuildZip(files) {
   });
 }
 
-// columns: [key, label, isNumber?][]. rows: plain objects keyed by column key.
-// Numbers are written as real numeric cells (so Excel sorts/formats them
-// correctly); everything else is written as an inline string, which avoids
-// needing a separate sharedStrings.xml part.
+// columns: [key, label, isNumber?, isUrl?][]. rows: plain objects keyed by
+// column key. Numbers are written as real numeric cells (so Excel sorts/
+// formats them correctly); everything else is written as an inline string,
+// which avoids needing a separate sharedStrings.xml part. isUrl columns get
+// a real hyperlink relationship (styled blue/underlined) so links work
+// immediately rather than needing Excel to be told to treat them as such.
 function buildXlsx(columns, rows) {
   const headerCells = columns
     .map(([, label], i) => `<c r="${xlsxColumnLetter(i)}1" t="inlineStr"><is><t>${xlsxXmlEscape(label)}</t></is></c>`)
     .join('');
   const sheetRows = [`<row r="1">${headerCells}</row>`];
+  const hyperlinks = []; // { ref, rId }
 
   rows.forEach((row, rowIdx) => {
     const r = rowIdx + 2;
     const cells = columns
-      .map(([key, , isNumber], i) => {
+      .map(([key, , isNumber, isUrl], i) => {
         const ref = `${xlsxColumnLetter(i)}${r}`;
         const value = row[key];
         if (value === '' || value === null || value === undefined) return `<c r="${ref}"/>`;
         if (isNumber && Number.isFinite(Number(value))) {
           return `<c r="${ref}"><v>${Number(value)}</v></c>`;
         }
+        if (isUrl) {
+          const rId = `rIdHlink${hyperlinks.length + 1}`;
+          hyperlinks.push({ ref, rId, target: value });
+          return `<c r="${ref}" t="inlineStr" s="1"><is><t>${xlsxXmlEscape(value)}</t></is></c>`;
+        }
         return `<c r="${ref}" t="inlineStr"><is><t>${xlsxXmlEscape(value)}</t></is></c>`;
       })
       .join('');
     sheetRows.push(`<row r="${r}">${cells}</row>`);
   });
+
+  const hyperlinksXml = hyperlinks.length
+    ? `<hyperlinks>${hyperlinks.map((h) => `<hyperlink ref="${h.ref}" r:id="${h.rId}"/>`).join('')}</hyperlinks>`
+    : '';
+  const sheetRelsXml = hyperlinks.length
+    ? '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+      '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+      hyperlinks
+        .map(
+          (h) =>
+            `<Relationship Id="${h.rId}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" Target="${xlsxXmlEscape(h.target)}" TargetMode="External"/>`
+        )
+        .join('') +
+      '</Relationships>'
+    : null;
 
   const files = {
     '[Content_Types].xml':
@@ -170,18 +193,28 @@ function buildXlsx(columns, rows) {
     'xl/styles.xml':
       '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
       '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
-      '<fonts count="1"><font><sz val="11"/><name val="Calibri"/></font></fonts>' +
+      '<fonts count="2">' +
+      '<font><sz val="11"/><name val="Calibri"/></font>' +
+      '<font><sz val="11"/><name val="Calibri"/><color rgb="FF0563C1"/><u/></font>' +
+      '</fonts>' +
       '<fills count="1"><fill><patternFill patternType="none"/></fill></fills>' +
       '<borders count="1"><border/></borders>' +
       '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>' +
-      '<cellXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/></cellXfs>' +
+      '<cellXfs count="2">' +
+      '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>' +
+      '<xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/>' +
+      '</cellXfs>' +
       '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>' +
       '</styleSheet>',
     'xl/worksheets/sheet1.xml':
       '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
-      '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
-      `<sheetData>${sheetRows.join('')}</sheetData></worksheet>`,
+      '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">' +
+      `<sheetData>${sheetRows.join('')}</sheetData>${hyperlinksXml}</worksheet>`,
   };
+
+  if (sheetRelsXml) {
+    files['xl/worksheets/_rels/sheet1.xml.rels'] = sheetRelsXml;
+  }
 
   return xlsxBuildZip(files);
 }

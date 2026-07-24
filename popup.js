@@ -92,6 +92,7 @@ stopBtn.addEventListener('click', () => {
 // charge, which don't apply when you're renting rather than buying.
 // Third element (isNumber) tells the xlsx writer to write the cell as a
 // real number rather than text, so Excel sorts/formats it correctly.
+// Fourth element (isUrl) makes it a real clickable hyperlink.
 const BUY_COLUMNS = [
   ['score', 'Score', true],
   ['address', 'Address'],
@@ -112,7 +113,7 @@ const BUY_COLUMNS = [
   ['epcRating', 'EPC Rating'],
   ['agent', 'Agent'],
   ['firstVisibleDate', 'Date Listed'],
-  ['url', 'URL'],
+  ['url', 'URL', false, true],
 ];
 
 const RENT_COLUMNS = [
@@ -133,7 +134,7 @@ const RENT_COLUMNS = [
   ['epcRating', 'EPC Rating'],
   ['agent', 'Agent'],
   ['firstVisibleDate', 'Date Listed'],
-  ['url', 'URL'],
+  ['url', 'URL', false, true],
 ];
 
 // Size comes through as free text like "1,234 sq. ft." - pull the number
