@@ -15,7 +15,21 @@ everything to an Excel file.
   it has no effect otherwise) to pull fields that only exist on each
   listing's own page - council tax band, EPC rating, ground rent, service
   charge. This is slower since it's a real page load per listing; if Chrome
-  gets sluggish, lower "Parallel windows".
+  gets sluggish, lower "Parallel windows". A checklist appears alongside it
+  to choose which of those fields to actually fetch.
+  - One option, "Estimate size from floorplan when missing", is off by
+    default: Rightmove doesn't always have a size figure on file at all
+    (shows "Ask agent"), but the floorplan image usually has the Gross
+    Internal Area printed on it. When this is on and a listing has no size,
+    the extension OCRs the floorplan image (via a locally-bundled
+    Tesseract.js - no external service, no API key) and looks for a
+    "NNN sq ft" figure on it. This only works when the floorplan actually
+    states a total (some, especially stylised marketing floorplans, don't)
+    and OCR isn't perfect, so estimated values are written as e.g.
+    "916 sq. ft. (est. from floorplan)" - clearly marked, never blended in
+    silently as if it were Rightmove's own figure - and feed into Price per
+    Sq Ft and the "size" ranking the same way a real size would. It also
+    adds a few real seconds of processing per listing that needs it.
 - Rightmove caps how many results can actually be paged through (roughly
   1,000, regardless of your total match count). To get everything, narrow
   the search below ~1,000 results - e.g. split by price band, bedrooms, or
@@ -90,8 +104,9 @@ everything to an Excel file.
 
 1. Do a search on rightmove.co.uk and land on the results (list) page.
 2. Click the extension icon.
-3. Optionally enter a postcode under "Distance from", tick "Also fetch full
-   details", and/or adjust "Parallel windows".
+3. Optionally enter a postcode under "Distance from", tick "Fetch full
+   details" and choose which of those fields to pull, and/or adjust
+   "Parallel windows".
 4. Click "Scrape all pages". Watch progress in the popup.
 5. Click "Download Excel" once it's done (or at any point after clicking
    Stop - it exports whatever's been scraped so far).
@@ -105,3 +120,10 @@ everything to an Excel file.
   blank, the selectors may need updating.
 - Only tested against the standard for-sale/to-rent search list view
   (`.../find.html`), not the map view.
+- The floorplan-size OCR was validated against real Rightmove floorplans
+  (the OCR engine itself, run standalone, reads the printed area correctly
+  when one exists) but not against the full in-extension pipeline (the
+  offscreen document + Chrome's OCR message passing) end-to-end in a live
+  browser session. If it doesn't seem to be working, check the offscreen
+  document's console via `chrome://extensions` → "Inspect views" for
+  errors, and report back what they say.

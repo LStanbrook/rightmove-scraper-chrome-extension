@@ -3,8 +3,12 @@
   "name": "Rightmove Bulk Scraper",
   "version": "0.1.0",
   "description": "Scrape price, beds, size, tenure and more for every listing on a Rightmove search results page, with CSV export.",
-  "permissions": ["scripting", "tabs", "downloads", "storage"],
-  "host_permissions": ["https://www.rightmove.co.uk/*", "https://api.postcodes.io/*"],
+  "permissions": ["scripting", "tabs", "downloads", "storage", "offscreen"],
+  "host_permissions": [
+    "https://www.rightmove.co.uk/*",
+    "https://api.postcodes.io/*",
+    "https://media.rightmove.co.uk/*"
+  ],
   "background": {
     "service_worker": "background.js"
   },

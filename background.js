@@ -10,6 +10,17 @@ const DETAIL_SCRAPE_CONCURRENCY = 4; // default/fallback - overridable per-run f
 const OPEN_WINDOWS_KEY = 'rmScraperOpenWindows';
 const SAVED_ROWS_KEY = 'rmScraperSavedRows';
 
+// Falls back to "everything except the slow/experimental OCR one" if the
+// popup ever sends a scrape request without an explicit selection.
+const DEFAULT_DETAIL_FIELDS = {
+  tenure: true,
+  councilTaxBand: true,
+  epcRating: true,
+  groundRent: true,
+  serviceCharge: true,
+  floorplanSize: false,
+};
+
 let state = makeIdleState();
 
 function makeIdleState() {
@@ -244,14 +255,58 @@ function extractDetailFieldsInPage() {
     return m ? (m[1] || '').trim() : '';
   };
 
+  // Rightmove doesn't always have a size figure on file at all (shows "Ask
+  // agent"), but the floorplan image - when there is one - usually has the
+  // Gross Internal Area printed on it. Surface its full-resolution URL
+  // (the DOM only has a small thumbnail) so the caller can OCR it as a
+  // fallback; the "_max_WxH" suffix is Rightmove's thumbnail-sizing
+  // convention, and stripping it gives the original upload.
+  let floorplanUrl = '';
+  const floorplanImg = document.querySelector('img[alt^="Floorplan"]');
+  if (floorplanImg && floorplanImg.src) {
+    floorplanUrl = floorplanImg.src.replace(/_max_\d+x\d+(\.\w+)(\?.*)?$/, '$1');
+  }
+
   return {
     size,
     tenure,
+    floorplanUrl,
     councilTaxBand: grab(/Council [Tt]ax[^\n]{0,20}?Band\s*([A-H])\b/),
     epcRating: grab(/EPC [Rr]ating[:\s]*([A-G])\b/),
     groundRent: grab(/Ground [Rr]ent[:\s]*£?([\d,]+(?:\.\d+)?(?:\s*per\s*\w+)?)/),
     serviceCharge: grab(/Service [Cc]harge[:\s]*£?([\d,]+(?:\.\d+)?(?:\s*per\s*\w+)?)/),
   };
+}
+
+// ---- Floorplan OCR (fallback for listings with no size on file) ----
+// Runs in an offscreen document (a real page context), not here - an MV3
+// service worker can't spawn Workers or use WebAssembly directly, both of
+// which Tesseract.js needs.
+const OFFSCREEN_URL = 'offscreen.html';
+
+async function ensureOffscreenDocument() {
+  const contexts = await chrome.runtime.getContexts({ contextTypes: ['OFFSCREEN_DOCUMENT'] });
+  if (contexts.length > 0) return;
+  await chrome.offscreen.createDocument({
+    url: OFFSCREEN_URL,
+    reasons: ['WORKERS'],
+    justification: 'Runs OCR on floorplan images to estimate square footage when Rightmove has none on file.',
+  });
+}
+
+async function closeOffscreenDocument() {
+  try {
+    const contexts = await chrome.runtime.getContexts({ contextTypes: ['OFFSCREEN_DOCUMENT'] });
+    if (contexts.length > 0) await chrome.offscreen.closeDocument();
+  } catch (e) {
+    // ignore
+  }
+}
+
+async function ocrFloorplanSqFt(imageUrl) {
+  await ensureOffscreenDocument();
+  const resp = await chrome.runtime.sendMessage({ type: 'OCR_FLOORPLAN', imageUrl });
+  return (resp && resp.sqft) || null;
 }
 
 // Must be called BEFORE chrome.tabs.update() triggers the navigation, not
@@ -284,7 +339,7 @@ function waitForTabComplete(tabId, timeoutMs) {
 // or a previous crash-recovery pass closed it out from under an in-flight
 // runner). Any other failure (bad load, timeout) just fails this one
 // listing without condemning the tab itself.
-async function scrapeOneDetail(tabId, row, attempt = 1) {
+async function scrapeOneDetail(tabId, row, detailFields, attempt = 1) {
   if (!row.url) return true;
   try {
     const loaded = waitForTabComplete(tabId, 25000);
@@ -318,18 +373,31 @@ async function scrapeOneDetail(tabId, row, attempt = 1) {
       if (result.size && result.size.toLowerCase() !== 'ask agent') {
         row.size = row.size || result.size;
       }
-      if (result.tenure) row.tenure = row.tenure || result.tenure;
-      row.councilTaxBand = result.councilTaxBand;
-      row.epcRating = result.epcRating;
-      row.groundRent = result.groundRent;
-      row.serviceCharge = result.serviceCharge;
+      if (detailFields.tenure && result.tenure) row.tenure = row.tenure || result.tenure;
+      if (detailFields.councilTaxBand) row.councilTaxBand = result.councilTaxBand;
+      if (detailFields.epcRating) row.epcRating = result.epcRating;
+      if (detailFields.groundRent) row.groundRent = result.groundRent;
+      if (detailFields.serviceCharge) row.serviceCharge = result.serviceCharge;
+
+      // Slow (real OCR) and imperfect, so opt-in only, and only attempted
+      // when there's genuinely no size figure to fall back from. Flagged
+      // in the value itself ("est. from floorplan") rather than silently
+      // blended in, so it's never mistaken for Rightmove's own figure.
+      if (detailFields.floorplanSize && !row.size && result.floorplanUrl) {
+        try {
+          const sqft = await ocrFloorplanSqFt(result.floorplanUrl);
+          if (sqft) row.size = `${sqft} sq. ft. (est. from floorplan)`;
+        } catch (e) {
+          state.log.push(`Floorplan size estimate failed for ${row.url}: ${e.message}`);
+        }
+      }
     }
     return true;
   } catch (e) {
     const tabGone = /No tab with id/i.test(e.message);
     if (!tabGone && attempt < 2 && state.running) {
       await sleep(800);
-      return scrapeOneDetail(tabId, row, attempt + 1);
+      return scrapeOneDetail(tabId, row, detailFields, attempt + 1);
     }
     state.log.push(`Detail fetch failed for ${row.url}: ${e.message}`);
     return !tabGone;
@@ -346,7 +414,7 @@ async function createPoolWindow() {
   return { windowId: win.id, tabId: win.tabs[0].id };
 }
 
-async function deepScrapeAll(requestedConcurrency) {
+async function deepScrapeAll(requestedConcurrency, detailFields) {
   state.phase = 'details';
   state.total = state.rows.length;
   state.scraped = 0;
@@ -378,7 +446,7 @@ async function deepScrapeAll(requestedConcurrency) {
       while (state.running) {
         const i = next++;
         if (i >= state.rows.length) return;
-        const tabOk = await scrapeOneDetail(entry.tabId, state.rows[i]);
+        const tabOk = await scrapeOneDetail(entry.tabId, state.rows[i], detailFields);
         if (!tabOk && state.running) {
           // The tab this runner was using is gone - replace it rather than
           // let every remaining listing on this runner fail the same way.
@@ -402,6 +470,7 @@ async function deepScrapeAll(requestedConcurrency) {
   } finally {
     await Promise.all(pool.map((p) => chrome.windows.remove(p.windowId).catch(() => {})));
     await chrome.storage.local.remove(OPEN_WINDOWS_KEY).catch(() => {});
+    await closeOffscreenDocument();
   }
 }
 
@@ -458,7 +527,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       await scrapeAllPages(firstSearchResults, resp.url);
 
       if (msg.deep && state.running) {
-        await deepScrapeAll(msg.detailConcurrency);
+        await deepScrapeAll(msg.detailConcurrency, msg.detailFields || DEFAULT_DETAIL_FIELDS);
       }
 
       state.running = false;

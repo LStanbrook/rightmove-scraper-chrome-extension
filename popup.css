@@ -181,6 +181,44 @@ h1 {
   margin-left: 20px;
 }
 
+.detail-fields {
+  margin: 0 0 10px 20px;
+  padding: 6px 8px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  background: #f7f7f7;
+}
+
+.detail-fields.disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.detail-fields-title {
+  font-weight: 600;
+  font-size: 11px;
+  margin-bottom: 4px;
+}
+
+.detail-fields label {
+  display: block;
+  font-size: 12px;
+  line-height: 1.4;
+  margin-bottom: 3px;
+  cursor: pointer;
+}
+
+.detail-fields label:last-child {
+  margin-bottom: 0;
+}
+
+.detail-fields .hint {
+  display: block;
+  margin-left: 18px;
+  color: #777;
+  font-size: 11px;
+}
+
 .concurrency-row {
   display: block;
   margin-bottom: 10px;

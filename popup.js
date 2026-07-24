@@ -7,6 +7,8 @@ const deepToggle = document.getElementById('deepToggle');
 const deepToggleLabel = document.querySelector('.deep-toggle');
 const concurrencyInput = document.getElementById('concurrencyInput');
 const concurrencyRow = document.querySelector('.concurrency-row');
+const detailFieldsEl = document.querySelector('.detail-fields');
+const detailFieldCheckboxes = document.querySelectorAll('.detail-field');
 const refPostcodeInput = document.getElementById('refPostcode');
 const refLocationRow = document.querySelector('.ref-location');
 const progressWrap = document.getElementById('progressWrap');
@@ -21,14 +23,44 @@ const weightPanelEl = document.querySelector('.weight-panel');
 
 let lastState = null;
 
-// "Parallel windows" only matters when "Also fetch full details" is on -
-// it's meaningless otherwise, since the fast scrape never opens any hidden
-// windows at all. Keep it out of the way until it's relevant.
-function updateConcurrencyVisibility() {
-  concurrencyRow.classList.toggle('hidden', !deepToggle.checked);
+const DETAIL_FIELDS_STORAGE_KEY = 'rmScraperDetailFields';
+
+function getDetailFields() {
+  const fields = {};
+  detailFieldCheckboxes.forEach((cb) => {
+    fields[cb.dataset.field] = cb.checked;
+  });
+  return fields;
 }
-deepToggle.addEventListener('change', updateConcurrencyVisibility);
-updateConcurrencyVisibility();
+
+function saveDetailFields() {
+  localStorage.setItem(DETAIL_FIELDS_STORAGE_KEY, JSON.stringify(getDetailFields()));
+}
+
+function loadDetailFields() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(DETAIL_FIELDS_STORAGE_KEY) || 'null');
+    if (!saved || typeof saved !== 'object') return;
+    detailFieldCheckboxes.forEach((cb) => {
+      if (typeof saved[cb.dataset.field] === 'boolean') cb.checked = saved[cb.dataset.field];
+    });
+  } catch (e) {
+    // ignore
+  }
+}
+
+// "Parallel windows" and the detail-field checklist only matter when
+// "Fetch full details" is on - both are meaningless otherwise, since the
+// fast scrape never opens any hidden windows at all. Keep them out of the
+// way until they're relevant.
+function updateDeepOptionsVisibility() {
+  concurrencyRow.classList.toggle('hidden', !deepToggle.checked);
+  detailFieldsEl.classList.toggle('hidden', !deepToggle.checked);
+}
+deepToggle.addEventListener('change', updateDeepOptionsVisibility);
+detailFieldCheckboxes.forEach((cb) => cb.addEventListener('change', saveDetailFields));
+loadDetailFields();
+updateDeepOptionsVisibility();
 
 function render(state) {
   if (!state) return;
@@ -42,6 +74,10 @@ function render(state) {
   deepToggleLabel.classList.toggle('disabled', state.running);
   concurrencyInput.disabled = state.running;
   concurrencyRow.classList.toggle('disabled', state.running);
+  detailFieldsEl.classList.toggle('disabled', state.running);
+  detailFieldCheckboxes.forEach((cb) => {
+    cb.disabled = state.running;
+  });
   refPostcodeInput.disabled = state.running;
   refLocationRow.classList.toggle('disabled', state.running);
   weightPanelEl.classList.toggle('disabled', state.running);
@@ -90,6 +126,7 @@ startBtn.addEventListener('click', () => {
     type: 'START_SCRAPE',
     deep: deepToggle.checked,
     detailConcurrency,
+    detailFields: getDetailFields(),
   });
 });
 
