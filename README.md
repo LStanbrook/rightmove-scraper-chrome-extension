@@ -32,24 +32,34 @@ everything to an Excel file.
   much (e.g. price mattering twice as much as bedrooms). Drag a slider to 0
   to drop that trait from the ranking entirely. Distance's slider is greyed
   out and left out of the pie until a "Distance from" postcode is set,
-  since it can't affect anything without one. Price and distance are
-  weighted on a curve rather than linearly, so a listing that's merely a
-  bit pricier or a bit further barely loses score, while one that's way
-  over on either loses more - the penalty accelerates the further out it
-  gets, rather than scaling evenly step for step. The curve is deliberately
-  gentle rather than steep, since a steep one crushes every "close" listing
-  toward the same displayed 100%, making genuinely different nearby
-  distances look identical - the displayed percentage is necessarily
-  rounded, but sorting (exports, Top Matches, Open Top 10) always uses the
-  unrounded score underneath, so listings that display the same percentage
-  still rank in their true order. Every listing stays in the ranking, but
-  one missing most of what you're ranking by (e.g. a parking space with no
-  bedrooms/bathrooms/size) has its score pulled toward a neutral 50% in
-  proportion to how much is missing, so it can't "win" purely by acing the
-  one or two metrics it happens to have - a listing only missing one common
-  field like size is barely affected. Price/distance outliers are also
-  clamped to roughly the 5th-95th percentile of the batch before scoring,
-  so one freak listing can't skew everyone else's score.
+  since it can't affect anything without one. Recomputed live from whatever
+  the sliders say right now, every time it's needed - re-ranking after a
+  scrape (or before exporting) always reflects the current sliders, not
+  whatever they were set to during the scrape.
+  - Price is weighted on a curve relative to the rest of the batch: a
+    listing merely a bit pricier than the cheapest barely loses score,
+    while one way over loses a lot more. Price/bedrooms/bathrooms/size are
+    all scored this way - relative to what's actually on offer in this
+    search, clamped to roughly the 5th-95th percentile so one freak
+    outlier (e.g. a parking space at a tenth of everyone else's price)
+    can't skew the scale for every other listing.
+  - Distance instead uses a fixed decay from the actual km value (score
+    halves every 1.5km: 0km=100%, 1.5km=50%, 3km=25%, 6km=6%), rather than
+    being relative to the batch. A relative curve doesn't work for
+    distance - in a search spanning a wide area, "2km away" is a tiny
+    fraction of that range, so it'd round to ~100 no matter how steep the
+    curve, regardless of how far it really is from the closest listing.
+    With the fixed decay, only genuinely close listings score near 100.
+  - The displayed percentage is rounded, but sorting (exports, Top
+    Matches, Open Top 10) always uses the unrounded score underneath, so
+    two listings that happen to display the same rounded percentage still
+    rank in their true order.
+  - Every listing stays in the ranking, but one missing most of what
+    you're ranking by (e.g. a parking space with no bedrooms/bathrooms/
+    size) has its score pulled toward a neutral 50% in proportion to how
+    much is missing, so it can't "win" purely by acing the one or two
+    metrics it happens to have - a listing only missing one common field
+    like size is barely affected.
 - "Open Top 10" opens the current top 10 ranked listings in new tabs, using
   whatever ranking order is currently set.
 

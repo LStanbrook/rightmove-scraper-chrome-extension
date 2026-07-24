@@ -155,17 +155,27 @@ function parseSizeSqFt(sizeStr) {
 // accelerates instead of scaling linearly - e.g. going from 2km to 4km away
 // costs more score than going from 0km to 2km did. 1 (or omitted) is plain
 // linear; higher values are more forgiving in the middle of the range but
-// hit the far/worst end of it much harder. Kept fairly gentle (rather than
-// a steeper exponent) because too aggressive a curve crushes every "close"
-// listing's score toward the same ~100, making genuinely different nearby
-// distances indistinguishable - the goal is to punish the far tail harder,
-// not to flatten out the resolution among the listings that matter most.
+// hit the far/worst end of it much harder. Used for price, where "good"
+// only makes sense relative to what's actually on offer in this search.
+//
+// Distance is handled differently (`decayHalfKm` instead of `curve`):
+// price/bedrooms/bathrooms/size are scored relative to the batch's own
+// spread (min-max, "best of what's on offer" = 100%), which is right for
+// them since there's no fixed absolute idea of a "good" price. But that's
+// wrong for distance - if a search happens to span a huge area, "2km away"
+// is a tiny fraction of that range, so a relative curve rounds it to ~100
+// no matter how steep, however far it really is from the closest listing.
+// Distance instead uses a fixed exponential decay from the raw km value
+// itself: score halves every `decayHalfKm` km, regardless of what the rest
+// of the batch looks like. Only genuinely close listings (a small fraction
+// of decayHalfKm) round to 100 - e.g. at 1.5, 0km=100%, 1.5km=50%,
+// 3km=25%, 6km=6%, 10km=~2%.
 const RANK_METRICS = {
   price: { key: 'price', better: 'lower', curve: 2 },
   bedrooms: { key: 'bedrooms', better: 'higher' },
   bathrooms: { key: 'bathrooms', better: 'higher' },
   size: { key: 'size', better: 'higher', parse: parseSizeSqFt },
-  distanceKm: { key: 'distanceKm', better: 'lower', curve: 1.5 },
+  distanceKm: { key: 'distanceKm', decayHalfKm: 1.5 },
 };
 const METRIC_ORDER = ['distanceKm', 'size', 'price', 'bedrooms', 'bathrooms'];
 const METRIC_COLORS = {
@@ -232,8 +242,10 @@ function computeScores(rows, weights) {
   // dragging price all the way down) can't stretch the whole scale and
   // make every normal listing look artificially close to "perfect".
   // Values outside that band are clamped to it rather than dropped.
+  // (Not used for distance - see decayHalfKm above.)
   const ranges = {};
   for (const w of active) {
+    if (w.decayHalfKm) continue;
     const values = rows.map((r) => numericValue(r, w)).filter((v) => v !== null).sort((a, b) => a - b);
     ranges[w.key] = values.length ? { min: percentile(values, 0.05), max: percentile(values, 0.95) } : null;
   }
@@ -242,18 +254,23 @@ function computeScores(rows, weights) {
     let weightedSum = 0;
     let weightTotal = 0;
     for (const w of active) {
-      const range = ranges[w.key];
-      if (!range) continue;
       const v = numericValue(row, w);
       if (v === null) continue;
-      const clamped = Math.min(range.max, Math.max(range.min, v));
-      let norm = range.max === range.min ? 0.5 : (clamped - range.min) / (range.max - range.min);
-      if (w.better === 'lower') norm = 1 - norm;
-      if (w.curve && w.curve !== 1) {
-        // norm is "goodness" here (1 = best) - curve the "badness" tail
-        // (1 - norm) so it falls off faster the worse it gets, then flip
-        // back to goodness.
-        norm = 1 - Math.pow(1 - norm, w.curve);
+      let norm;
+      if (w.decayHalfKm) {
+        norm = Math.pow(0.5, Math.max(0, v) / w.decayHalfKm);
+      } else {
+        const range = ranges[w.key];
+        if (!range) continue;
+        const clamped = Math.min(range.max, Math.max(range.min, v));
+        norm = range.max === range.min ? 0.5 : (clamped - range.min) / (range.max - range.min);
+        if (w.better === 'lower') norm = 1 - norm;
+        if (w.curve && w.curve !== 1) {
+          // norm is "goodness" here (1 = best) - curve the "badness" tail
+          // (1 - norm) so it falls off faster the worse it gets, then flip
+          // back to goodness.
+          norm = 1 - Math.pow(1 - norm, w.curve);
+        }
       }
       weightedSum += norm * w.weight;
       weightTotal += w.weight;
