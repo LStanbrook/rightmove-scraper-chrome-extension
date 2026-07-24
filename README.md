@@ -30,7 +30,13 @@ everything to CSV.
   distance are weighted on a curve rather than linearly, so a listing that's
   merely a bit pricier or a bit further barely loses score, while one that's
   way over on either loses a lot more - the penalty accelerates the further
-  out it gets, rather than scaling evenly step for step.
+  out it gets, rather than scaling evenly step for step. A listing missing
+  most of what you're ranking by (e.g. a parking space with no
+  bedrooms/bathrooms/size) is left unscored rather than ranked purely on
+  the one or two metrics it happens to have, so it can't "win" just for
+  being cheap. Price/distance outliers are also clamped to roughly the
+  5th-95th percentile of the batch before scoring, so one freak listing
+  can't skew everyone else's score.
 - "Open Top 10" opens the current top 10 ranked listings in new tabs, using
   whatever ranking order is currently set.
 

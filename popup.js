@@ -178,20 +178,35 @@ function getWeights() {
   return order.map((metricKey, i) => ({ ...RANK_METRICS[metricKey], weight: n - i }));
 }
 
+// Linear-interpolated percentile of an already-sorted numeric array.
+function percentile(sortedValues, p) {
+  const idx = (sortedValues.length - 1) * p;
+  const lo = Math.floor(idx);
+  const hi = Math.ceil(idx);
+  if (lo === hi) return sortedValues[lo];
+  return sortedValues[lo] + (sortedValues[hi] - sortedValues[lo]) * (idx - lo);
+}
+
 // Min-max normalizes each metric across the given rows (so "best of what's
 // actually on offer" scores 100%, "worst" scores 0%), then combines them
 // into one 0-100 score per row using a weighted average. A row missing a
-// particular metric (e.g. no bathrooms figure, or no distance because no
-// reference postcode was set) just has that metric excluded from its own
-// average rather than being penalised for it.
+// metric or two (e.g. no bathrooms figure) just has those excluded from its
+// own average rather than being penalised for them - but a row missing most
+// of what's being ranked by doesn't get scored at all (see below).
 function computeScores(rows, weights) {
   const active = weights.filter((w) => w.weight > 0);
   if (!active.length) return rows.map(() => null);
+  const totalWeight = active.reduce((sum, w) => sum + w.weight, 0);
 
+  // Min/max taken from the 5th-95th percentile rather than the true
+  // extremes, so a single freak outlier (e.g. a Β£15k parking space
+  // dragging price all the way down) can't stretch the whole scale and
+  // make every normal listing look artificially close to "perfect".
+  // Values outside that band are clamped to it rather than dropped.
   const ranges = {};
   for (const w of active) {
-    const values = rows.map((r) => numericValue(r, w)).filter((v) => v !== null);
-    ranges[w.key] = values.length ? { min: Math.min(...values), max: Math.max(...values) } : null;
+    const values = rows.map((r) => numericValue(r, w)).filter((v) => v !== null).sort((a, b) => a - b);
+    ranges[w.key] = values.length ? { min: percentile(values, 0.05), max: percentile(values, 0.95) } : null;
   }
 
   return rows.map((row) => {
@@ -202,7 +217,8 @@ function computeScores(rows, weights) {
       if (!range) continue;
       const v = numericValue(row, w);
       if (v === null) continue;
-      let norm = range.max === range.min ? 0.5 : (v - range.min) / (range.max - range.min);
+      const clamped = Math.min(range.max, Math.max(range.min, v));
+      let norm = range.max === range.min ? 0.5 : (clamped - range.min) / (range.max - range.min);
       if (w.better === 'lower') norm = 1 - norm;
       if (w.curve && w.curve !== 1) {
         // norm is "goodness" here (1 = best) - curve the "badness" tail
@@ -213,7 +229,12 @@ function computeScores(rows, weights) {
       weightedSum += norm * w.weight;
       weightTotal += w.weight;
     }
-    return weightTotal > 0 ? Math.round((weightedSum / weightTotal) * 100) : null;
+    // A listing only missing one or two metrics (e.g. no size figure) still
+    // gets fairly judged on the rest. But one that's missing most of what
+    // you're ranking by - a parking space with no bedrooms/bathrooms/size -
+    // shouldn't be able to "win" on the strength of a single easy metric
+    // like price. Require data covering most of the weight before scoring.
+    return weightTotal >= totalWeight * 0.5 ? Math.round((weightedSum / weightTotal) * 100) : null;
   });
 }
 
