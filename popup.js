@@ -2,6 +2,7 @@ const statusEl = document.getElementById('status');
 const startBtn = document.getElementById('startBtn');
 const stopBtn = document.getElementById('stopBtn');
 const downloadBtn = document.getElementById('downloadBtn');
+const openTopBtn = document.getElementById('openTopBtn');
 const deepToggle = document.getElementById('deepToggle');
 const deepToggleLabel = document.querySelector('.deep-toggle');
 const concurrencyInput = document.getElementById('concurrencyInput');
@@ -25,6 +26,7 @@ function render(state) {
   startBtn.disabled = state.running;
   stopBtn.disabled = !state.running;
   downloadBtn.disabled = state.running || state.rows.length === 0;
+  openTopBtn.disabled = state.running || state.rows.length === 0;
   deepToggle.disabled = state.running;
   deepToggleLabel.classList.toggle('disabled', state.running);
   concurrencyInput.disabled = state.running;
@@ -145,12 +147,17 @@ function parseSizeSqFt(sizeStr) {
 // one ranking number, based on the drag-and-drop order (most important
 // first). Order is turned into weights linearly - with 5 metrics, 1st place
 // counts 5x as much as 5th place, 2nd place 4x, and so on. ----
+// `curve` bends the penalty for the "bad" end of a metric's range so it
+// accelerates instead of scaling linearly - e.g. going from 2km to 4km away
+// costs more score than going from 0km to 2km did. 1 (or omitted) is plain
+// linear; higher values punish the bad end more sharply. Applied to price
+// and distance since both have long, punishing tails.
 const RANK_METRICS = {
-  price: { key: 'price', better: 'lower' },
+  price: { key: 'price', better: 'lower', curve: 2 },
   bedrooms: { key: 'bedrooms', better: 'higher' },
   bathrooms: { key: 'bathrooms', better: 'higher' },
   size: { key: 'size', better: 'higher', parse: parseSizeSqFt },
-  distanceKm: { key: 'distanceKm', better: 'lower' },
+  distanceKm: { key: 'distanceKm', better: 'lower', curve: 2 },
 };
 const RANK_ORDER_STORAGE_KEY = 'rmScraperRankOrder';
 
@@ -197,6 +204,12 @@ function computeScores(rows, weights) {
       if (v === null) continue;
       let norm = range.max === range.min ? 0.5 : (v - range.min) / (range.max - range.min);
       if (w.better === 'lower') norm = 1 - norm;
+      if (w.curve && w.curve !== 1) {
+        // norm is "goodness" here (1 = best) - curve the "badness" tail
+        // (1 - norm) so it falls off faster the worse it gets, then flip
+        // back to goodness.
+        norm = 1 - Math.pow(1 - norm, w.curve);
+      }
       weightedSum += norm * w.weight;
       weightTotal += w.weight;
     }
@@ -268,6 +281,16 @@ function escapeHtml(s) {
   return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
+// Ranks the given rows by current suitability weights, best first, dropping
+// any with no score (missing every ranked metric).
+function getRankedRows(rows) {
+  const scores = computeScores(rows, getWeights());
+  return rows
+    .map((row, i) => ({ row, score: scores[i] }))
+    .filter((s) => s.score !== null)
+    .sort((a, b) => b.score - a.score);
+}
+
 function renderTopMatches() {
   const rows = lastState && lastState.rows ? lastState.rows : [];
   if (!rows.length) {
@@ -276,12 +299,7 @@ function renderTopMatches() {
     return;
   }
 
-  const scores = computeScores(rows, getWeights());
-  const top = rows
-    .map((row, i) => ({ row, score: scores[i] }))
-    .filter((s) => s.score !== null)
-    .sort((a, b) => b.score - a.score)
-    .slice(0, 5);
+  const top = getRankedRows(rows).slice(0, 5);
 
   if (!top.length) {
     topMatchesEl.classList.add('hidden');
@@ -327,6 +345,18 @@ function toCSV(rows, channel) {
   });
   return lines.join('\r\n');
 }
+
+openTopBtn.addEventListener('click', () => {
+  chrome.runtime.sendMessage({ type: 'GET_STATE' }, (resp) => {
+    const rows = resp && resp.state ? resp.state.rows : [];
+    if (!rows.length) return;
+    const top = getRankedRows(rows)
+      .slice(0, 10)
+      .map((s) => s.row.url)
+      .filter(Boolean);
+    top.forEach((url, i) => chrome.tabs.create({ url, active: i === 0 }));
+  });
+});
 
 downloadBtn.addEventListener('click', () => {
   chrome.runtime.sendMessage({ type: 'GET_STATE' }, (resp) => {

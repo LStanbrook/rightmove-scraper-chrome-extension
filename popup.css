@@ -174,12 +174,14 @@ h1 {
 
 .buttons {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
   margin-bottom: 10px;
 }
 
 button {
   flex: 1;
+  min-width: 100px;
   padding: 6px 8px;
   border: 1px solid #ccc;
   border-radius: 4px;
@@ -203,6 +205,12 @@ button#downloadBtn {
   background: #1a4fbb;
   color: white;
   border-color: #1a4fbb;
+}
+
+button#openTopBtn {
+  background: #7a3ec7;
+  color: white;
+  border-color: #7a3ec7;
 }
 
 .hidden {

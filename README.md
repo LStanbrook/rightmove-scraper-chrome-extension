@@ -26,7 +26,13 @@ everything to CSV.
   "Distance (km)" column.
 - "Rank by importance" lets you drag price / bedrooms / bathrooms / size /
   distance into a priority order to get a 0-100% "Suitability Score" column,
-  so you can sort listings by what actually matters to you.
+  so you can sort listings by what actually matters to you. Price and
+  distance are weighted on a curve rather than linearly, so a listing that's
+  merely a bit pricier or a bit further barely loses score, while one that's
+  way over on either loses a lot more - the penalty accelerates the further
+  out it gets, rather than scaling evenly step for step.
+- "Open Top 10" opens the current top 10 ranked listings in new tabs, using
+  whatever ranking order is currently set.
 
 ## Install (unpacked)
 
@@ -43,6 +49,7 @@ everything to CSV.
 4. Click "Scrape all pages". Watch progress in the popup.
 5. Click "Download CSV" once it's done (or at any point after clicking Stop
    - it exports whatever's been scraped so far).
+6. Click "Open Top 10" to open the current top-ranked listings in new tabs.
 
 ## Known limitations
 
