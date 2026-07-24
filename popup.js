@@ -227,11 +227,22 @@ function percentile(sortedValues, p) {
 
 // Min-max normalizes each metric across the given rows (so "best of what's
 // actually on offer" scores 100%, "worst" scores 0%), then combines them
-// into one 0-100 score per row using a weighted average. A row missing a
-// metric or two (e.g. no bathrooms figure) just has those excluded from its
-// own average rather than being penalised for them. Every row with at least
-// one known ranked metric still gets included and scored (see the coverage
-// blend below) - nothing gets dropped from the ranking.
+// into one 0-100 score per row using a weighted GEOMETRIC mean (not a
+// plain average - see below). A row missing a metric or two (e.g. no
+// bathrooms figure) just has those excluded rather than being penalised
+// for them. Every row with at least one known ranked metric still gets
+// included and scored (see the coverage blend below) - nothing gets
+// dropped from the ranking.
+//
+// Geometric, not arithmetic: with a plain weighted average, a metric at
+// (say) 50% weight can never pull the total below 50 if everything else
+// scores 100 - the other half of the weight acts as a guaranteed floor no
+// matter how bad that one metric is. That makes it impossible for "far
+// away" to really hurt a score once other metrics are strong, regardless
+// of how harshly the individual metric itself is curved. A weighted
+// geometric mean doesn't have that floor - a poor score on a heavily
+// weighted metric drags the total down hard, while a lightly weighted
+// metric still only has proportionally small influence.
 function computeScores(rows, weights) {
   const active = weights.filter((w) => w.weight > 0);
   if (!active.length) return rows.map(() => null);
@@ -251,7 +262,7 @@ function computeScores(rows, weights) {
   }
 
   return rows.map((row) => {
-    let weightedSum = 0;
+    let logSum = 0;
     let weightTotal = 0;
     for (const w of active) {
       const v = numericValue(row, w);
@@ -272,11 +283,15 @@ function computeScores(rows, weights) {
           norm = 1 - Math.pow(1 - norm, w.curve);
         }
       }
-      weightedSum += norm * w.weight;
+      // Floored rather than left at literal 0 so one catastrophic metric
+      // doesn't force the geometric mean to exactly 0 regardless of every
+      // other metric - it still gets crushed toward 0, just not to a hard
+      // wall that would make two very-bad-but-different listings tie.
+      logSum += w.weight * Math.log(Math.max(norm, 0.001));
       weightTotal += w.weight;
     }
     if (weightTotal === 0) return null;
-    // Blend the row's own average toward a neutral 50% by how much of the
+    // Blend the row's own score toward a neutral 50% by how much of the
     // ranking's total weight it actually has data for. A listing missing
     // just one commonly-absent metric (e.g. size) has coverage close to 1,
     // so this barely moves it. A listing missing almost everything - a
@@ -285,7 +300,7 @@ function computeScores(rows, weights) {
     // "unknown, assume average" instead of standing in as its whole score.
     // Nothing gets excluded outright; a very sparse row just can't coast to
     // the top on a single easy metric.
-    const raw = weightedSum / weightTotal;
+    const raw = Math.exp(logSum / weightTotal);
     const coverage = weightTotal / totalWeight;
     const blended = raw * coverage + 0.5 * (1 - coverage);
     // Left unrounded here so sorting (CSV, Top Matches, Open Top 10) can

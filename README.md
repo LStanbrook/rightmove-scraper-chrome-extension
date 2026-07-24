@@ -36,6 +36,16 @@ everything to an Excel file.
   the sliders say right now, every time it's needed - re-ranking after a
   scrape (or before exporting) always reflects the current sliders, not
   whatever they were set to during the scrape.
+  - The per-metric scores are combined with a weighted *geometric* mean,
+    not a plain average - a plain average can't let a bad score truly tank
+    the total (a metric at 50% weight can never pull the score below 50 if
+    everything else is perfect, whatever the weight, since the other half
+    of the weight is a guaranteed floor). The geometric mean has no such
+    floor: a poor score on a heavily-weighted metric drags the total down
+    hard, while a lightly-weighted metric still only has proportionally
+    small influence - so a listing 9km away with an otherwise-perfect
+    score scores ~13% overall if distance is half your ranking, but ~76%
+    if distance is only a twentieth of it.
   - Price is weighted on a curve relative to the rest of the batch: a
     listing merely a bit pricier than the cheapest barely loses score,
     while one way over loses a lot more. Price/bedrooms/bathrooms/size are
