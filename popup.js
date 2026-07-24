@@ -191,8 +191,9 @@ function percentile(sortedValues, p) {
 // actually on offer" scores 100%, "worst" scores 0%), then combines them
 // into one 0-100 score per row using a weighted average. A row missing a
 // metric or two (e.g. no bathrooms figure) just has those excluded from its
-// own average rather than being penalised for them - but a row missing most
-// of what's being ranked by doesn't get scored at all (see below).
+// own average rather than being penalised for them. Every row with at least
+// one known ranked metric still gets included and scored (see the coverage
+// blend below) - nothing gets dropped from the ranking.
 function computeScores(rows, weights) {
   const active = weights.filter((w) => w.weight > 0);
   if (!active.length) return rows.map(() => null);
@@ -229,12 +230,20 @@ function computeScores(rows, weights) {
       weightedSum += norm * w.weight;
       weightTotal += w.weight;
     }
-    // A listing only missing one or two metrics (e.g. no size figure) still
-    // gets fairly judged on the rest. But one that's missing most of what
-    // you're ranking by - a parking space with no bedrooms/bathrooms/size -
-    // shouldn't be able to "win" on the strength of a single easy metric
-    // like price. Require data covering most of the weight before scoring.
-    return weightTotal >= totalWeight * 0.5 ? Math.round((weightedSum / weightTotal) * 100) : null;
+    if (weightTotal === 0) return null;
+    // Blend the row's own average toward a neutral 50% by how much of the
+    // ranking's total weight it actually has data for. A listing missing
+    // just one commonly-absent metric (e.g. size) has coverage close to 1,
+    // so this barely moves it. A listing missing almost everything - a
+    // parking space with only a price - has low coverage, so however great
+    // its one known metric looks gets pulled most of the way back to
+    // "unknown, assume average" instead of standing in as its whole score.
+    // Nothing gets excluded outright; a very sparse row just can't coast to
+    // the top on a single easy metric.
+    const raw = weightedSum / weightTotal;
+    const coverage = weightTotal / totalWeight;
+    const blended = raw * coverage + 0.5 * (1 - coverage);
+    return Math.round(blended * 100);
   });
 }
 
