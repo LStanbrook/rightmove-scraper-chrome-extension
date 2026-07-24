@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Rightmove Bulk Scraper</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <h1>Rightmove Bulk Scraper</h1>
+  <div id="status">Open a Rightmove search results page, then come back here.</div>
+
+  <label class="ref-location">
+    Distance from:
+    <input type="text" id="refPostcode" placeholder="e.g. EC2A 4BX" />
+    <span class="hint">optional - UK postcode. Adds a straight-line distance (km) column</span>
+  </label>
+
+  <div class="score-box">
+    <div class="score-title">Rank by importance <span class="hint">(drag to reorder, most important first)</span></div>
+    <ul id="rankList" class="rank-list">
+      <li draggable="true" data-metric="price"><span class="rank-num">1</span>Cheaper price</li>
+      <li draggable="true" data-metric="bedrooms"><span class="rank-num">2</span>More bedrooms</li>
+      <li draggable="true" data-metric="bathrooms"><span class="rank-num">3</span>More bathrooms</li>
+      <li draggable="true" data-metric="size"><span class="rank-num">4</span>More size</li>
+      <li draggable="true" data-metric="distanceKm"><span class="rank-num">5</span>Closer distance</li>
+    </ul>
+    <div class="hint">needs a "Distance from" postcode above to have any effect</div>
+    <div id="topMatches" class="top-matches hidden"></div>
+  </div>
+
+  <label class="deep-toggle">
+    <input type="checkbox" id="deepToggle" />
+    Also fetch full details (tenure, council tax band, EPC, service charge)
+    <span class="hint">slower - briefly opens each listing in a hidden window</span>
+  </label>
+
+  <label class="concurrency-row">
+    Parallel windows:
+    <input type="number" id="concurrencyInput" min="1" max="10" value="4" />
+    <span class="hint">lower this if Chrome becomes sluggish or unresponsive during a scrape</span>
+  </label>
+
+  <div class="buttons">
+    <button id="startBtn">Scrape all pages</button>
+    <button id="stopBtn" disabled>Stop</button>
+    <button id="downloadBtn" disabled>Download CSV</button>
+  </div>
+
+  <div id="progressWrap" class="hidden">
+    <div id="progressBar"><div id="progressFill"></div></div>
+    <div id="progressText"></div>
+  </div>
+
+  <div id="note" class="hidden"></div>
+  <div id="log"></div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
