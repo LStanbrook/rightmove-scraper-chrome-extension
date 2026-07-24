@@ -285,29 +285,38 @@ function extractDetailFieldsInPage() {
 // which Tesseract.js needs.
 const OFFSCREEN_URL = 'offscreen.html';
 
+// Tries to create the offscreen document directly rather than checking for
+// one first via chrome.runtime.getContexts (Chrome 116+) - createDocument
+// itself atomically rejects with an "only a single offscreen document"
+// style error if one already exists, which is the expected case for the
+// 2nd+ floorplan in a scrape, so that's treated as success. Avoiding the
+// separate check-then-create also avoids a race between them.
 async function ensureOffscreenDocument() {
-  const contexts = await chrome.runtime.getContexts({ contextTypes: ['OFFSCREEN_DOCUMENT'] });
-  if (contexts.length > 0) return;
-  await chrome.offscreen.createDocument({
-    url: OFFSCREEN_URL,
-    reasons: ['WORKERS'],
-    justification: 'Runs OCR on floorplan images to estimate square footage when Rightmove has none on file.',
-  });
+  try {
+    await chrome.offscreen.createDocument({
+      url: OFFSCREEN_URL,
+      reasons: ['WORKERS'],
+      justification: 'Runs OCR on floorplan images to estimate square footage when Rightmove has none on file.',
+    });
+  } catch (e) {
+    if (!/single offscreen|already exists/i.test(e.message)) throw e;
+  }
 }
 
 async function closeOffscreenDocument() {
   try {
-    const contexts = await chrome.runtime.getContexts({ contextTypes: ['OFFSCREEN_DOCUMENT'] });
-    if (contexts.length > 0) await chrome.offscreen.closeDocument();
+    await chrome.offscreen.closeDocument();
   } catch (e) {
-    // ignore
+    // ignore - most likely there just wasn't one open
   }
 }
 
 async function ocrFloorplanSqFt(imageUrl) {
   await ensureOffscreenDocument();
   const resp = await chrome.runtime.sendMessage({ type: 'OCR_FLOORPLAN', imageUrl });
-  return (resp && resp.sqft) || null;
+  if (!resp) throw new Error('no response from OCR worker (offscreen document may have failed to load)');
+  if (resp.error) throw new Error(resp.error);
+  return resp.sqft || null;
 }
 
 // Must be called BEFORE chrome.tabs.update() triggers the navigation, not
@@ -385,12 +394,20 @@ async function scrapeOneDetail(tabId, row, detailFields, attempt = 1) {
       // its own column (sizeOcrSqFt) rather than into size itself, so it's
       // never mistaken for Rightmove's own figure - popup.js still uses it
       // as a fallback for ranking/Price per Sq Ft when size is blank.
-      if (detailFields.floorplanSize && !row.size && result.floorplanUrl) {
-        try {
-          const sqft = await ocrFloorplanSqFt(result.floorplanUrl);
-          if (sqft) row.sizeOcrSqFt = sqft;
-        } catch (e) {
-          state.log.push(`Floorplan size estimate failed for ${row.url}: ${e.message}`);
+      if (detailFields.floorplanSize && !row.size) {
+        if (!result.floorplanUrl) {
+          state.log.push(`No floorplan image found on page for ${row.url}`);
+        } else {
+          try {
+            const sqft = await ocrFloorplanSqFt(result.floorplanUrl);
+            if (sqft) {
+              row.sizeOcrSqFt = sqft;
+            } else {
+              state.log.push(`Floorplan OCR found no sq ft figure for ${row.url}`);
+            }
+          } catch (e) {
+            state.log.push(`Floorplan size estimate failed for ${row.url}: ${e.message}`);
+          }
         }
       }
     }
