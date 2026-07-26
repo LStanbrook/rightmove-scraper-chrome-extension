@@ -77,7 +77,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       }
       const worker = await getWorker();
       const { data } = await worker.recognize(blob);
-      sendResponse({ sqft: extractSqFt(data.text || '') });
+      const text = data.text || '';
+      sendResponse({
+        sqft: extractSqFt(text),
+        // Only read by the caller for one sample listing per scrape (see
+        // background.js) - lets a "found nothing" outcome be distinguished
+        // from "read garbage/blank" without logging this for every listing.
+        debug: { blobSize: blob.size, width: size.width, height: size.height, textLength: text.length, textPreview: text.slice(0, 200) },
+      });
     } catch (e) {
       sendResponse({ sqft: null, error: e.message });
     }

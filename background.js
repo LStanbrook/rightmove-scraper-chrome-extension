@@ -319,7 +319,7 @@ async function ocrFloorplanSqFt(imageUrl) {
   const resp = await chrome.runtime.sendMessage({ type: 'OCR_FLOORPLAN', imageUrl });
   if (!resp) throw new Error('no response from OCR worker (offscreen document may have failed to load)');
   if (resp.error) throw new Error(resp.error);
-  return resp.sqft || null;
+  return { sqft: resp.sqft || null, debug: resp.debug };
 }
 
 // Must be called BEFORE chrome.tabs.update() triggers the navigation, not
@@ -404,13 +404,19 @@ async function scrapeOneDetail(tabId, row, detailFields, floorplanStats, attempt
         } else {
           try {
             floorplanStats.attempted++;
-            const sqft = await ocrFloorplanSqFt(result.floorplanUrl);
+            const { sqft, debug } = await ocrFloorplanSqFt(result.floorplanUrl);
             // No log entry when this comes back empty - a floorplan simply
             // not stating a total sq ft figure is a normal, expected
             // outcome, not something worth flagging every time it happens.
             if (sqft) {
               row.sizeOcrSqFt = sqft;
               floorplanStats.found++;
+            } else if (!floorplanStats.sample && debug) {
+              // One concrete example of what OCR actually read on a "found
+              // nothing" listing, captured once per scrape - enough to
+              // tell a genuinely blank floorplan apart from OCR silently
+              // reading the wrong/corrupted/placeholder image.
+              floorplanStats.sample = debug;
             }
           } catch (e) {
             // Grouped into the end-of-scrape summary (by message, with
@@ -460,7 +466,7 @@ async function deepScrapeAll(requestedConcurrency, detailFields) {
   // OCR. found: of those, how many produced a sq ft figure. Logged as one
   // summary line at the end - not so it can be silently on and produce
   // nothing without any visible sign of that happening.
-  const floorplanStats = { eligible: 0, attempted: 0, found: 0, errors: {} };
+  const floorplanStats = { eligible: 0, attempted: 0, found: 0, errors: {}, sample: null };
 
   async function saveOpenWindows() {
     await chrome.storage.local.set({ [OPEN_WINDOWS_KEY]: pool.map((p) => p.windowId) }).catch(() => {});
@@ -517,6 +523,12 @@ async function deepScrapeAll(requestedConcurrency, detailFields) {
       const errorEntries = Object.entries(floorplanStats.errors);
       if (errorEntries.length) {
         summary += ' Errors: ' + errorEntries.map(([msg, count]) => `${count}x "${msg}"`).join('; ');
+      }
+      if (floorplanStats.sample) {
+        const s = floorplanStats.sample;
+        summary +=
+          ` Sample miss: fetched ${s.blobSize} bytes, decoded as ${s.width}x${s.height}px, ` +
+          `OCR read ${s.textLength} chars: "${s.textPreview}"`;
       }
       state.log.push(summary);
     }
