@@ -413,7 +413,14 @@ async function scrapeOneDetail(tabId, row, detailFields, floorplanStats, attempt
               floorplanStats.found++;
             }
           } catch (e) {
-            state.log.push(`Floorplan size estimate failed for ${row.url}: ${e.message}`);
+            // Grouped into the end-of-scrape summary (by message, with
+            // specific numbers like image dimensions collapsed so e.g.
+            // every "too small" case lands in one bucket) rather than
+            // logged per-listing - with hundreds of listings, individual
+            // lines scroll straight out of the log's small viewport and
+            // are easy to miss entirely.
+            const key = e.message.replace(/\d+/g, 'N');
+            floorplanStats.errors[key] = (floorplanStats.errors[key] || 0) + 1;
           }
         }
       }
@@ -453,7 +460,7 @@ async function deepScrapeAll(requestedConcurrency, detailFields) {
   // OCR. found: of those, how many produced a sq ft figure. Logged as one
   // summary line at the end - not so it can be silently on and produce
   // nothing without any visible sign of that happening.
-  const floorplanStats = { eligible: 0, attempted: 0, found: 0 };
+  const floorplanStats = { eligible: 0, attempted: 0, found: 0, errors: {} };
 
   async function saveOpenWindows() {
     await chrome.storage.local.set({ [OPEN_WINDOWS_KEY]: pool.map((p) => p.windowId) }).catch(() => {});
@@ -504,10 +511,14 @@ async function deepScrapeAll(requestedConcurrency, detailFields) {
     await chrome.storage.local.remove(OPEN_WINDOWS_KEY).catch(() => {});
     await closeOffscreenDocument();
     if (detailFields.floorplanSize) {
-      state.log.push(
+      let summary =
         `Floorplan size estimate: ${floorplanStats.eligible} listing(s) had no size, ` +
-        `${floorplanStats.attempted} had a floorplan to OCR, ${floorplanStats.found} produced a sq ft figure.`
-      );
+        `${floorplanStats.attempted} had a floorplan to OCR, ${floorplanStats.found} produced a sq ft figure.`;
+      const errorEntries = Object.entries(floorplanStats.errors);
+      if (errorEntries.length) {
+        summary += ' Errors: ' + errorEntries.map(([msg, count]) => `${count}x "${msg}"`).join('; ');
+      }
+      state.log.push(summary);
     }
   }
 }
