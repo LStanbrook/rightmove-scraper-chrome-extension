@@ -17,22 +17,29 @@ everything to an Excel file.
   charge. This is slower since it's a real page load per listing; if Chrome
   gets sluggish, lower "Parallel windows". A checklist appears alongside it
   to choose which of those fields to actually fetch.
-  - One option, "Estimate size from floorplan when missing", is off by
-    default: Rightmove doesn't always have a size figure on file at all
-    (shows "Ask agent"), but the floorplan image usually has the Gross
-    Internal Area printed on it. When this is on and a listing has no size,
-    the extension OCRs the floorplan image (via a locally-bundled
-    Tesseract.js - no external service, no API key) and looks for a
-    "NNN sq ft" or "NNN ft²" total on it (both conventions show up in
-    practice). This only works when the floorplan actually states a total
-    (some, especially stylised marketing floorplans, don't - a "75m2, no
-    sq ft anywhere" floorplan is left alone rather than guessed at)
-    and OCR isn't perfect, so the result goes into its own "Size (OCR est.,
-    sq ft)" column rather than into "Size" itself - it's always visible
-    which listings got a real Rightmove figure versus an OCR guess. It's
-    still used as a fallback for Price per Sq Ft and the "size" ranking
-    when "Size" is blank. Adds a few real seconds of processing per listing
-    that needs it.
+  - One option, "Estimate size from floorplan when missing or an outlier",
+    is off by default: Rightmove doesn't always have a size figure on file
+    at all (shows "Ask agent"), but the floorplan image usually has the
+    Gross Internal Area printed on it. When this is on, the extension OCRs
+    the floorplan (via a locally-bundled Tesseract.js - no external
+    service, no API key) for any listing with no size, and looks for a
+    total in whatever form it's stated - "NNN sq ft", "NNN ft²", or
+    "NNN sq. feet" all show up in practice. This only works when the
+    floorplan actually states a total (some, especially stylised marketing
+    floorplans, don't) and OCR isn't perfect, so the result goes into its
+    own "Size (OCR est., sq ft)" column rather than into "Size" itself -
+    it's always visible which listings got a real Rightmove figure versus
+    an OCR guess. It's still used as a fallback for Price per Sq Ft and
+    the "size" ranking when "Size" is blank. Adds a few real seconds of
+    processing per listing that needs it.
+  - It also re-checks a listing that already has a size if that size is a
+    clear statistical outlier against the rest of the batch (computed
+    once per scrape, in log space so it isn't skewed by the natural mix of
+    small and large properties) - usually a sign of a data-entry error
+    (a missing or extra digit) rather than a genuinely unusual property.
+    The floorplan reading still only ever populates the separate OCR
+    column, so a real, just-unusual property can't have its own figure
+    overwritten by a lower-confidence guess.
 - Rightmove caps how many results can actually be paged through (roughly
   1,000, regardless of your total match count). To get everything, narrow
   the search below ~1,000 results - e.g. split by price band, bedrooms, or
