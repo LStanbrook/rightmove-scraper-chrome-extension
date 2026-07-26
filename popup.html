@@ -71,8 +71,8 @@
     <label><input type="checkbox" class="detail-field" data-field="serviceCharge" checked /> Service Charge</label>
     <label>
       <input type="checkbox" class="detail-field" data-field="floorplanSize" />
-      Estimate size from floorplan when missing
-      <span class="hint">experimental - reads the floorplan image with OCR, adds a few seconds per listing, and isn't always accurate. Estimated values are marked "(est. from floorplan)"</span>
+      Estimate size from floorplan when missing or an outlier
+      <span class="hint">experimental - reads the floorplan image with OCR, adds a few seconds per listing, and isn't always accurate. Also double-checks listings whose listed size looks like a data-entry error. Estimates go in their own "Size (OCR est.)" column, never overwriting Rightmove's own figure</span>
     </label>
   </div>
 

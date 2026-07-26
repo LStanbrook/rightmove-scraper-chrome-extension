@@ -219,6 +219,41 @@ async function scrapeAllPages(firstSearchResults, pageUrl) {
   }
 }
 
+// Mirrors popup.js's parseSizeSqFt - background.js and popup.js are
+// separate contexts with no shared module, so this is duplicated rather
+// than imported.
+function parseSizeSqFt(sizeStr) {
+  if (!sizeStr) return null;
+  const m = String(sizeStr).replace(/,/g, '').match(/(\d+(?:\.\d+)?)/);
+  return m ? parseFloat(m[1]) : null;
+}
+
+// A listed size is only worth re-checking against its floorplan if it's a
+// genuinely implausible value (most likely a missing/extra digit), not
+// merely a large or small property - so this uses a wide IQR multiplier
+// (3x, rather than the usual 1.5x for "mild" outliers) deliberately tuned
+// to only flag clear cases. Needs a reasonable amount of data to define a
+// meaningful distribution; returns null (nothing flagged) otherwise.
+//
+// Computed in log space, not raw sq ft: property sizes are naturally
+// right-skewed (a batch is far more likely to include a 3,000 sq ft house
+// than a -1,000 sq ft one), so a typo that makes a size 10x too small
+// (e.g. "96" instead of "960") and one that makes it 10x too large are
+// equally extreme relative to the batch, but a linear IQR badly
+// underweights the small-side case - its lower bound tends to be pulled
+// toward (or past) zero by the same right skew, making it far too
+// permissive to ever flag a suspiciously small value.
+function computeSizeOutlierBounds(rows) {
+  const sizes = rows.map((r) => parseSizeSqFt(r.size)).filter((v) => v !== null && v > 0);
+  if (sizes.length < 10) return null;
+  const logSizes = sizes.map((s) => Math.log(s)).sort((a, b) => a - b);
+  const q1 = logSizes[Math.floor(logSizes.length * 0.25)];
+  const q3 = logSizes[Math.floor(logSizes.length * 0.75)];
+  const iqr = q3 - q1;
+  if (iqr <= 0) return null;
+  return { low: Math.exp(q1 - 3 * iqr), high: Math.exp(q3 + 3 * iqr) };
+}
+
 // ---- Deep scrape: visit each listing's own page for fields that only exist there ----
 // (council tax band, EPC rating, ground rent, service charge).
 // These render client-side after the page's own JS runs, so we open the real
@@ -352,7 +387,7 @@ function waitForTabComplete(tabId, timeoutMs) {
 // or a previous crash-recovery pass closed it out from under an in-flight
 // runner). Any other failure (bad load, timeout) just fails this one
 // listing without condemning the tab itself.
-async function scrapeOneDetail(tabId, row, detailFields, floorplanStats, attempt = 1) {
+async function scrapeOneDetail(tabId, row, detailFields, floorplanStats, sizeOutlierBounds, attempt = 1) {
   if (!row.url) return true;
   try {
     const loaded = waitForTabComplete(tabId, 25000);
@@ -392,13 +427,22 @@ async function scrapeOneDetail(tabId, row, detailFields, floorplanStats, attempt
       if (detailFields.groundRent) row.groundRent = result.groundRent;
       if (detailFields.serviceCharge) row.serviceCharge = result.serviceCharge;
 
-      // Slow (real OCR) and imperfect, so opt-in only, and only attempted
-      // when there's genuinely no size figure to fall back from. Written to
-      // its own column (sizeOcrSqFt) rather than into size itself, so it's
-      // never mistaken for Rightmove's own figure - popup.js still uses it
-      // as a fallback for ranking/Price per Sq Ft when size is blank.
-      if (detailFields.floorplanSize && !row.size) {
+      // Slow (real OCR) and imperfect, so opt-in only. Normally only
+      // attempted when there's no size figure to fall back from - but also
+      // re-checked when a LISTED size is a clear statistical outlier (see
+      // computeSizeOutlierBounds), since that's usually a data-entry error
+      // (a missing/extra digit) rather than a genuinely unusual property,
+      // and the floorplan is a good independent source to catch it. Either
+      // way the result is written to its own column (sizeOcrSqFt) rather
+      // than into size itself, so it's never mistaken for Rightmove's own
+      // figure - popup.js still uses it as a fallback for ranking/Price
+      // per Sq Ft when size is blank.
+      const listedSqFt = parseSizeSqFt(row.size);
+      const isSizeOutlier =
+        listedSqFt !== null && sizeOutlierBounds && (listedSqFt < sizeOutlierBounds.low || listedSqFt > sizeOutlierBounds.high);
+      if (detailFields.floorplanSize && (!row.size || isSizeOutlier)) {
         floorplanStats.eligible++;
+        if (isSizeOutlier) floorplanStats.outlierChecks++;
         if (!result.floorplanUrl) {
           state.log.push(`No floorplan image found on page for ${row.url}`);
         } else {
@@ -411,19 +455,12 @@ async function scrapeOneDetail(tabId, row, detailFields, floorplanStats, attempt
             if (sqft) {
               row.sizeOcrSqFt = sqft;
               floorplanStats.found++;
-            } else if (!floorplanStats.sample) {
+            } else if (!floorplanStats.sample && debug) {
               // One concrete example of what OCR actually read on a "found
-              // nothing" listing, captured once per scrape - enough to
-              // tell a genuinely blank floorplan apart from OCR silently
-              // reading the wrong/corrupted/placeholder image. A missing
-              // debug field here (rather than the expected object) means
-              // the offscreen document is running stale code from before
-              // this diagnostic existed - it can outlive an extension
-              // reload if it was holding an active Worker open, and needs
-              // Chrome fully closed and reopened (or the unpacked
-              // extension removed and re-added) to clear.
-              floorplanStats.sample =
-                debug || { note: 'no debug info in response - offscreen document is likely running stale code; fully close and reopen Chrome, or remove and re-add the unpacked extension' };
+              // nothing" listing, captured once per scrape - useful for
+              // telling a genuinely blank floorplan apart from OCR reading
+              // the wrong image or hitting some other silent problem.
+              floorplanStats.sample = debug;
             }
           } catch (e) {
             // Grouped into the end-of-scrape summary (by message, with
@@ -443,7 +480,7 @@ async function scrapeOneDetail(tabId, row, detailFields, floorplanStats, attempt
     const tabGone = /No tab with id/i.test(e.message);
     if (!tabGone && attempt < 2 && state.running) {
       await sleep(800);
-      return scrapeOneDetail(tabId, row, detailFields, floorplanStats, attempt + 1);
+      return scrapeOneDetail(tabId, row, detailFields, floorplanStats, sizeOutlierBounds, attempt + 1);
     }
     state.log.push(`Detail fetch failed for ${row.url}: ${e.message}`);
     return !tabGone;
@@ -468,12 +505,19 @@ async function deepScrapeAll(requestedConcurrency, detailFields) {
 
   const concurrency = Math.max(1, Math.min(requestedConcurrency || DETAIL_SCRAPE_CONCURRENCY, state.rows.length || 1));
   const pool = [];
-  // eligible: listings missing a size where the floorplan option was on at
-  // all. attempted: of those, how many actually had a floorplan image to
-  // OCR. found: of those, how many produced a sq ft figure. Logged as one
-  // summary line at the end - not so it can be silently on and produce
-  // nothing without any visible sign of that happening.
-  const floorplanStats = { eligible: 0, attempted: 0, found: 0, errors: {}, sample: null };
+  // eligible: listings missing a size, or whose listed size is a clear
+  // statistical outlier, where the floorplan option was on at all.
+  // outlierChecks: of those, how many were triggered by the outlier check
+  // specifically (as opposed to simply having no size at all). attempted:
+  // of those, how many actually had a floorplan image to OCR. found: of
+  // those, how many produced a sq ft figure. Logged as one summary line at
+  // the end - not so it can be silently on and produce nothing without any
+  // visible sign of that happening.
+  const floorplanStats = { eligible: 0, outlierChecks: 0, attempted: 0, found: 0, errors: {}, sample: null };
+  // Computed once up front from whatever sizes the fast scrape already
+  // found, rather than per-listing - a listing's own size doesn't change
+  // the batch's overall distribution enough to be worth recomputing live.
+  const sizeOutlierBounds = detailFields.floorplanSize ? computeSizeOutlierBounds(state.rows) : null;
 
   async function saveOpenWindows() {
     await chrome.storage.local.set({ [OPEN_WINDOWS_KEY]: pool.map((p) => p.windowId) }).catch(() => {});
@@ -498,7 +542,7 @@ async function deepScrapeAll(requestedConcurrency, detailFields) {
       while (state.running) {
         const i = next++;
         if (i >= state.rows.length) return;
-        const tabOk = await scrapeOneDetail(entry.tabId, state.rows[i], detailFields, floorplanStats);
+        const tabOk = await scrapeOneDetail(entry.tabId, state.rows[i], detailFields, floorplanStats, sizeOutlierBounds);
         if (!tabOk && state.running) {
           // The tab this runner was using is gone - replace it rather than
           // let every remaining listing on this runner fail the same way.
@@ -525,7 +569,8 @@ async function deepScrapeAll(requestedConcurrency, detailFields) {
     await closeOffscreenDocument();
     if (detailFields.floorplanSize) {
       let summary =
-        `Floorplan size estimate: ${floorplanStats.eligible} listing(s) had no size, ` +
+        `Floorplan size estimate: ${floorplanStats.eligible} listing(s) needed a check ` +
+        `(${floorplanStats.outlierChecks} for having a listed size that looked like an outlier), ` +
         `${floorplanStats.attempted} had a floorplan to OCR, ${floorplanStats.found} produced a sq ft figure.`;
       const errorEntries = Object.entries(floorplanStats.errors);
       if (errorEntries.length) {
