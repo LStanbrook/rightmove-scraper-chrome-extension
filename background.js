@@ -487,8 +487,15 @@ async function scrapeOneDetail(tabId, row, detailFields, floorplanStats, sizeOut
     return true;
   } catch (e) {
     const tabGone = /No tab with id/i.test(e.message);
-    if (!tabGone && attempt < 2 && state.running) {
-      await sleep(800);
+    // Verified against real scrapes: a handful of listings out of a few
+    // hundred hit a transient "Frame with ID 0 is showing error page" -
+    // the tab briefly showed Chrome's own network-error interstitial when
+    // the script tried to read it (likely a passing hiccup from running
+    // several parallel windows at once), even though the same URL loads
+    // fine moments later. A single retry wasn't always enough, so this
+    // gets two, with a longer wait each time.
+    if (!tabGone && attempt < 3 && state.running) {
+      await sleep(800 * attempt);
       return scrapeOneDetail(tabId, row, detailFields, floorplanStats, sizeOutlierBounds, attempt + 1);
     }
     state.log.push(`Detail fetch failed for ${row.url}: ${e.message}`);

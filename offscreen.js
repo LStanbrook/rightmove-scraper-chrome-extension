@@ -12,12 +12,27 @@
 
 // Several conventions show up on real Rightmove floorplans: "624 sq ft",
 // "751 Sq Ft.", "567 ft²" with no "sq" at all, and "629.7 sq. feet" spelled
-// out with a decimal. Tesseract also reliably misreads the "²" as "?"
-// (verified against real floorplan images), so that's accepted as an
-// equivalent marker specifically in the ft-only form.
-const SQFT_RE = /(\d[\d,]{0,6}(?:\.\d+)?)\s*(?:sq\.?\s*ft\b|sq\.?\s*feet\b|ft\.?\s*[²2?])/i;
+// out with a decimal. Tesseract also reliably misreads the "²" as "?", and
+// (verified against real floorplans reading "806 SQ FT" as "£08 5Q FT" and
+// "94 sq ft" as "94 5q ft") sometimes misreads the "S" in "SQ" as a "5" -
+// both accepted as equivalent markers.
+const SQFT_RE = /(\d[\d,]{0,6}(?:\.\d+)?)\s*(?:[s5][qo]\.?\s*ft\b|[s5][qo]\.?\s*feet\b|ft\.?\s*[²2?])/gi;
 const MIN_PLAUSIBLE_SQFT = 50;
 const MAX_PLAUSIBLE_SQFT = 20000;
+// Labels that mean a nearby figure is NOT the whole property's own total:
+// "external" area (always larger than internal - counts wall thickness,
+// so blindly preferring the biggest number on the page would systematically
+// pick this over the correct internal figure) or a separate structure
+// (verified against a real floorplan pairing a house's main total with a
+// much smaller "SUMMER HOUSE 107 SQFT" figure for its outbuilding, which a
+// plain reading-order or largest-value pick both got wrong).
+const EXTERNAL_AREA_RE = /external/i;
+const SEPARATE_STRUCTURE_RE = /summer\s*house|annex(?:e)?|outbuilding|garden\s*room|granny\s*flat|garage/i;
+const INTERNAL_AREA_RE = /internal/i;
+// How far back from a match to look for one of the labels above - scoped to
+// the same OCR text block (a blank line marks a new one) as a cap, so a
+// label describing an earlier, unrelated block can't be picked up.
+const LABEL_LOOKBACK_CHARS = 60;
 
 let workerPromise = null;
 
@@ -54,17 +69,40 @@ function getWorker() {
   return workerPromise;
 }
 
-// UK floorplans conventionally print the total ("Gross Internal Area")
-// figure first, near the top, with per-floor/per-room breakdowns (which
-// sum to it) appearing further down - so the first plausible "NNN sq ft"
-// match in reading order is taken as the total, rather than trying to
-// semantically distinguish a total from a sub-total.
+// Floorplans often print more than one "NNN sq ft" figure - per-floor
+// breakdowns alongside the whole-property total, or a separate structure's
+// own area next to the main total. Prefers a figure explicitly labelled
+// "internal" when there is one; otherwise falls back to any unlabelled
+// figure (most floorplans only ever state one total, with no "internal" /
+// "external" wording at all); external-area and separate-structure figures
+// are never used, even as a last resort - reporting either as if it were
+// the property's own internal size would be actively misleading rather
+// than merely imprecise, and it's safer to fall through to the room-
+// dimension estimate (or find nothing) than to report a confidently wrong
+// number. When more than one figure remains eligible (e.g. unlabelled
+// per-floor breakdowns next to an unlabelled total), the total can never
+// be smaller than a sub-area also stated on the same floorplan, so the
+// largest is taken.
 function extractStatedSqFt(text) {
-  const m = text.match(SQFT_RE);
-  if (!m) return null;
-  const value = Number(m[1].replace(/,/g, ''));
-  if (!Number.isFinite(value) || value < MIN_PLAUSIBLE_SQFT || value > MAX_PLAUSIBLE_SQFT) return null;
-  return value;
+  const candidates = [];
+  let match;
+  SQFT_RE.lastIndex = 0; // stateful (global) regex - reset before each use
+  while ((match = SQFT_RE.exec(text)) !== null) {
+    const value = Number(match[1].replace(/,/g, ''));
+    if (!Number.isFinite(value) || value < MIN_PLAUSIBLE_SQFT || value > MAX_PLAUSIBLE_SQFT) continue;
+    const blockStart = text.lastIndexOf('\n\n', match.index - 1);
+    const contextStart = Math.max(0, blockStart + 2, match.index - LABEL_LOOKBACK_CHARS);
+    const context = text.slice(contextStart, match.index);
+    candidates.push({
+      value,
+      internal: INTERNAL_AREA_RE.test(context),
+      excluded: EXTERNAL_AREA_RE.test(context) || SEPARATE_STRUCTURE_RE.test(context),
+    });
+  }
+  const internalOnes = candidates.filter((c) => c.internal);
+  if (internalOnes.length) return Math.max(...internalOnes.map((c) => c.value));
+  const eligible = candidates.filter((c) => !c.excluded);
+  return eligible.length ? Math.max(...eligible.map((c) => c.value)) : null;
 }
 
 // Fallback for floorplans with no stated total at all (or one too garbled

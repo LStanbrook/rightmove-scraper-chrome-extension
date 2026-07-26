@@ -29,7 +29,15 @@ everything to an Excel file.
     floorplans, don't) and OCR isn't perfect, so the result goes into its
     own "Size (OCR est., sq ft)" column rather than into "Size" itself -
     it's always visible which listings got a real Rightmove figure versus
-    an OCR guess. If no total is stated either, it falls back further to
+    an OCR guess. Floorplans sometimes print more than one figure - a
+    smaller separate structure's own area (an annex, summer house, garage)
+    next to the main total, or a Gross External Area alongside the Gross
+    Internal one - so a figure explicitly labelled "internal" is preferred
+    when there is one, and anything labelled "external" or belonging to a
+    separate structure is never used, even as a fallback: reporting either
+    as the property's own size would be actively misleading rather than
+    just imprecise, so it's treated the same as finding nothing. If no
+    reliable total is stated either, it falls back further to
     summing the individual room dimensions printed on the floorplan (e.g.
     "3.50m x 3.11m" per room) - a rougher estimate (it tends to run a
     little low, since hallways and cupboards aren't always dimensioned),
