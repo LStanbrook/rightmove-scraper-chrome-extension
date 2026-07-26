@@ -153,6 +153,7 @@ const BUY_COLUMNS = [
   ['serviceCharge', 'Service Charge'],
   ['size', 'Size'],
   ['sizeOcrSqFt', 'Size (OCR est., sq ft)', true],
+  ['sizeRoomSumSqFt', 'Size (rooms sum est., sq ft)', true],
   ['pricePerBedroom', 'Price per Bedroom', true],
   ['pricePerBathroom', 'Price per Bathroom', true],
   ['pricePerSqFt', 'Price per Sq Ft', true],
@@ -175,6 +176,7 @@ const RENT_COLUMNS = [
   ['letAvailableDate', 'Let Available Date'],
   ['size', 'Size'],
   ['sizeOcrSqFt', 'Size (OCR est., sq ft)', true],
+  ['sizeRoomSumSqFt', 'Size (rooms sum est., sq ft)', true],
   ['pricePerBedroom', 'Price per Bedroom', true],
   ['pricePerBathroom', 'Price per Bathroom', true],
   ['pricePerSqFt', 'Price per Sq Ft', true],
@@ -194,12 +196,15 @@ function parseSizeSqFt(sizeStr) {
   return m ? parseFloat(m[1]) : null;
 }
 
-// Rightmove's own size, falling back to the floorplan-OCR estimate (its
-// own column - see sizeOcrSqFt) only when there's no real figure at all.
+// Rightmove's own size, falling back first to a directly-read floorplan
+// total (sizeOcrSqFt) and then to a rougher room-dimensions-summed
+// estimate (sizeRoomSumSqFt) - each its own column - only when there's no
+// more confident figure available.
 function sizeSqFt(row) {
   const fromText = parseSizeSqFt(row.size);
   if (fromText !== null) return fromText;
-  return typeof row.sizeOcrSqFt === 'number' ? row.sizeOcrSqFt : null;
+  if (typeof row.sizeOcrSqFt === 'number') return row.sizeOcrSqFt;
+  return typeof row.sizeRoomSumSqFt === 'number' ? row.sizeRoomSumSqFt : null;
 }
 
 // ---- Suitability score: combine several differently-scaled metrics into

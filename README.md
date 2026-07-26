@@ -29,8 +29,14 @@ everything to an Excel file.
     floorplans, don't) and OCR isn't perfect, so the result goes into its
     own "Size (OCR est., sq ft)" column rather than into "Size" itself -
     it's always visible which listings got a real Rightmove figure versus
-    an OCR guess. It's still used as a fallback for Price per Sq Ft and
-    the "size" ranking when "Size" is blank. Adds a few real seconds of
+    an OCR guess. If no total is stated either, it falls back further to
+    summing the individual room dimensions printed on the floorplan (e.g.
+    "3.50m x 3.11m" per room) - a rougher estimate (it tends to run a
+    little low, since hallways and cupboards aren't always dimensioned),
+    so it gets its own separate "Size (rooms sum est., sq ft)" column
+    rather than being mixed in with direct reads. Both OCR columns are
+    still used as a fallback for Price per Sq Ft and the "size" ranking,
+    in that order, when "Size" is blank. Adds a few real seconds of
     processing per listing that needs it.
   - It also re-checks a listing that already has a size if that size is a
     clear statistical outlier against the rest of the batch (computed

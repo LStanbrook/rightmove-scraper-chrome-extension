@@ -147,6 +147,7 @@ function normalizeProperty(p) {
     tenure: (p.tenure && p.tenure.tenureType) || '',
     size: p.displaySize || '',
     sizeOcrSqFt: '',
+    sizeRoomSumSqFt: '',
     councilTaxBand: '',
     epcRating: '',
     groundRent: '',
@@ -354,7 +355,7 @@ async function ocrFloorplanSqFt(imageUrl) {
   const resp = await chrome.runtime.sendMessage({ type: 'OCR_FLOORPLAN', imageUrl });
   if (!resp) throw new Error('no response from OCR worker (offscreen document may have failed to load)');
   if (resp.error) throw new Error(resp.error);
-  return { sqft: resp.sqft || null, debug: resp.debug };
+  return { sqft: resp.sqft || null, source: resp.source, debug: resp.debug };
 }
 
 // Must be called BEFORE chrome.tabs.update() triggers the navigation, not
@@ -448,11 +449,19 @@ async function scrapeOneDetail(tabId, row, detailFields, floorplanStats, sizeOut
         } else {
           try {
             floorplanStats.attempted++;
-            const { sqft, debug } = await ocrFloorplanSqFt(result.floorplanUrl);
+            const { sqft, source, debug } = await ocrFloorplanSqFt(result.floorplanUrl);
             // No log entry when this comes back empty - a floorplan simply
             // not stating a total sq ft figure is a normal, expected
             // outcome, not something worth flagging every time it happens.
-            if (sqft) {
+            if (sqft && source === 'roomSum') {
+              // Rougher method (summed individual room dimensions, not a
+              // stated total) - kept in its own column rather than mixed
+              // in with direct reads, since it's a real estimate of a
+              // different, lower confidence.
+              row.sizeRoomSumSqFt = sqft;
+              floorplanStats.found++;
+              floorplanStats.foundRoomSum++;
+            } else if (sqft) {
               row.sizeOcrSqFt = sqft;
               floorplanStats.found++;
             } else if (!floorplanStats.sample && debug) {
@@ -513,7 +522,7 @@ async function deepScrapeAll(requestedConcurrency, detailFields) {
   // those, how many produced a sq ft figure. Logged as one summary line at
   // the end - not so it can be silently on and produce nothing without any
   // visible sign of that happening.
-  const floorplanStats = { eligible: 0, outlierChecks: 0, attempted: 0, found: 0, errors: {}, sample: null };
+  const floorplanStats = { eligible: 0, outlierChecks: 0, attempted: 0, found: 0, foundRoomSum: 0, errors: {}, sample: null };
   // Computed once up front from whatever sizes the fast scrape already
   // found, rather than per-listing - a listing's own size doesn't change
   // the batch's overall distribution enough to be worth recomputing live.
@@ -571,7 +580,8 @@ async function deepScrapeAll(requestedConcurrency, detailFields) {
       let summary =
         `Floorplan size estimate: ${floorplanStats.eligible} listing(s) needed a check ` +
         `(${floorplanStats.outlierChecks} for having a listed size that looked like an outlier), ` +
-        `${floorplanStats.attempted} had a floorplan to OCR, ${floorplanStats.found} produced a sq ft figure.`;
+        `${floorplanStats.attempted} had a floorplan to OCR, ${floorplanStats.found} produced a sq ft figure ` +
+        `(${floorplanStats.foundRoomSum} of those from summing room dimensions rather than a stated total).`;
       const errorEntries = Object.entries(floorplanStats.errors);
       if (errorEntries.length) {
         summary += ' Errors: ' + errorEntries.map(([msg, count]) => `${count}x "${msg}"`).join('; ');
