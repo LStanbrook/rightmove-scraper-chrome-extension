@@ -263,7 +263,10 @@ function extractDetailFieldsInPage() {
   // fallback; the "_max_WxH" suffix is Rightmove's thumbnail-sizing
   // convention, and stripping it gives the original upload.
   let floorplanUrl = '';
-  const floorplanImg = document.querySelector('img[alt^="Floorplan"]');
+  const floorplanImg =
+    document.querySelector('img[alt^="Floorplan"]') ||
+    document.querySelector('a[href*="floorplan"] img') ||
+    document.querySelector('img[alt*="loorplan"]');
   if (floorplanImg && floorplanImg.src) {
     floorplanUrl = floorplanImg.src.replace(/_max_\d+x\d+(\.\w+)(\?.*)?$/, '$1');
   }

@@ -10,7 +10,11 @@
 // (which would also multiply memory use, since each worker loads its own
 // copy of the ~7MB engine + language data).
 
-const SQFT_RE = /(\d[\d,]{1,6})\s*sq\.?\s*ft\b/i;
+// Two conventions show up on real Rightmove floorplans: "624 sq ft" and,
+// just as commonly, "567 ft²" with no "sq" at all. Tesseract also reliably
+// misreads the "²" as "?" (verified against real floorplan images), so
+// that's accepted as an equivalent marker specifically in the ft-only form.
+const SQFT_RE = /(\d[\d,]{1,6})\s*(?:sq\.?\s*ft\b|ft\.?\s*[²2?])/i;
 const MIN_PLAUSIBLE_SQFT = 50;
 const MAX_PLAUSIBLE_SQFT = 20000;
 

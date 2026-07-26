@@ -23,8 +23,10 @@ everything to an Excel file.
     Internal Area printed on it. When this is on and a listing has no size,
     the extension OCRs the floorplan image (via a locally-bundled
     Tesseract.js - no external service, no API key) and looks for a
-    "NNN sq ft" figure on it. This only works when the floorplan actually
-    states a total (some, especially stylised marketing floorplans, don't)
+    "NNN sq ft" or "NNN ft²" total on it (both conventions show up in
+    practice). This only works when the floorplan actually states a total
+    (some, especially stylised marketing floorplans, don't - a "75m2, no
+    sq ft anywhere" floorplan is left alone rather than guessed at)
     and OCR isn't perfect, so the result goes into its own "Size (OCR est.,
     sq ft)" column rather than into "Size" itself - it's always visible
     which listings got a real Rightmove figure versus an OCR guess. It's
