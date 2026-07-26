@@ -98,6 +98,23 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+// MV3 service workers get suspended after roughly 30s with no extension-API
+// activity - and a plain setTimeout/Promise sitting mid-await (like
+// waitForTabComplete's 25s load timeout) does NOT count as activity, so a
+// suspension wipes it out entirely: the timer never fires, nothing rejects,
+// nothing resolves, and the whole scrape just stops with no error and no
+// further progress. Reported symptom matched exactly - a scrape stalling
+// specifically on its last remaining listing, the point where there's
+// nothing else left running to generate the frequent chrome.* calls that
+// would otherwise keep the worker alive. A lightweight real API call every
+// few seconds resets that idle clock for the duration of the scrape.
+function startKeepAlive() {
+  const id = setInterval(() => {
+    chrome.runtime.getPlatformInfo(() => {});
+  }, 15000);
+  return () => clearInterval(id);
+}
+
 // Runs `worker(i)` for i in [0, count) using up to `concurrency` runners at
 // once, stopping early if state.running is flipped off (Stop button).
 async function runPool(count, concurrency, worker) {
@@ -539,6 +556,7 @@ async function deepScrapeAll(requestedConcurrency, detailFields) {
     await chrome.storage.local.set({ [OPEN_WINDOWS_KEY]: pool.map((p) => p.windowId) }).catch(() => {});
   }
 
+  const stopKeepAlive = startKeepAlive();
   try {
     // Window creation itself is what tends to choke an overloaded Chrome. If
     // it fails partway through (or the user hits Stop while we're still
@@ -580,6 +598,7 @@ async function deepScrapeAll(requestedConcurrency, detailFields) {
   } catch (e) {
     state.log.push(`Deep scrape stopped early: ${e.message}`);
   } finally {
+    stopKeepAlive();
     await Promise.all(pool.map((p) => chrome.windows.remove(p.windowId).catch(() => {})));
     await chrome.storage.local.remove(OPEN_WINDOWS_KEY).catch(() => {});
     await closeOffscreenDocument();

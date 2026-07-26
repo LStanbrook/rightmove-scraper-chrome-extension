@@ -199,12 +199,21 @@ function parseSizeSqFt(sizeStr) {
 // Rightmove's own size, falling back first to a directly-read floorplan
 // total (sizeOcrSqFt) and then to a rougher room-dimensions-summed
 // estimate (sizeRoomSumSqFt) - each its own column - only when there's no
-// more confident figure available.
+// more confident figure available. Except: a floorplan reading is only
+// ever attempted when "Size" was blank or flagged as a likely data-entry
+// error (see computeSizeOutlierBounds in background.js), so if it comes
+// back with a number that DISAGREES with "Size", that's a second,
+// independent check of a value that was already suspect - trust the
+// floorplan reading over it for ranking/Price per Sq Ft purposes. If they
+// agree, it's presumably a real, just-unusual property, so nothing is
+// overridden.
 function sizeSqFt(row) {
   const fromText = parseSizeSqFt(row.size);
-  if (fromText !== null) return fromText;
-  if (typeof row.sizeOcrSqFt === 'number') return row.sizeOcrSqFt;
-  return typeof row.sizeRoomSumSqFt === 'number' ? row.sizeRoomSumSqFt : null;
+  const fromOcr = typeof row.sizeOcrSqFt === 'number' ? row.sizeOcrSqFt : null;
+  const fromRoomSum = typeof row.sizeRoomSumSqFt === 'number' ? row.sizeRoomSumSqFt : null;
+  const fromFloorplan = fromOcr !== null ? fromOcr : fromRoomSum;
+  if (fromFloorplan !== null && fromFloorplan !== fromText) return fromFloorplan;
+  return fromText !== null ? fromText : fromFloorplan;
 }
 
 // ---- Suitability score: combine several differently-scaled metrics into

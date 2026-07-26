@@ -19,20 +19,46 @@
 const SQFT_RE = /(\d[\d,]{0,6}(?:\.\d+)?)\s*(?:[s5][qo]\.?\s*ft\b|[s5][qo]\.?\s*feet\b|ft\.?\s*[²2?])/gi;
 const MIN_PLAUSIBLE_SQFT = 50;
 const MAX_PLAUSIBLE_SQFT = 20000;
+const SQM_TO_SQFT = 10.7639;
 // Labels that mean a nearby figure is NOT the whole property's own total:
 // "external" area (always larger than internal - counts wall thickness,
 // so blindly preferring the biggest number on the page would systematically
-// pick this over the correct internal figure) or a separate structure
+// pick this over the correct internal figure), a separate structure
 // (verified against a real floorplan pairing a house's main total with a
 // much smaller "SUMMER HOUSE 107 SQFT" figure for its outbuilding, which a
-// plain reading-order or largest-value pick both got wrong).
+// plain reading-order or largest-value pick both got wrong), or an
+// explicitly excluded sub-area (verified against a real floorplan stating
+// "Total: 56 m2" alongside "Excluded Areas: Walls: 5 m2" - the latter is
+// smaller and would never win a largest-value pick anyway, but is excluded
+// defensively rather than relying on that).
 const EXTERNAL_AREA_RE = /external/i;
 const SEPARATE_STRUCTURE_RE = /summer\s*house|annex(?:e)?|outbuilding|garden\s*room|granny\s*flat|garage/i;
+const EXCLUDED_SUBAREA_RE = /excluded|\bwalls?\b/i;
 const INTERNAL_AREA_RE = /internal/i;
 // How far back from a match to look for one of the labels above - scoped to
 // the same OCR text block (a blank line marks a new one) as a cap, so a
 // label describing an earlier, unrelated block can't be picked up.
 const LABEL_LOOKBACK_CHARS = 60;
+
+function contextFor(text, index) {
+  const blockStart = text.lastIndexOf('\n\n', index - 1);
+  const contextStart = Math.max(0, blockStart + 2, index - LABEL_LOOKBACK_CHARS);
+  return text.slice(contextStart, index);
+}
+
+// Shared by the sq ft and sq m total extractors below: given a list of
+// candidate {value, context} readings, picks the one to trust.
+function pickBestTotal(matches) {
+  const candidates = matches.map(({ value, context }) => ({
+    value,
+    internal: INTERNAL_AREA_RE.test(context),
+    excluded: EXTERNAL_AREA_RE.test(context) || SEPARATE_STRUCTURE_RE.test(context) || EXCLUDED_SUBAREA_RE.test(context),
+  }));
+  const internalOnes = candidates.filter((c) => c.internal);
+  if (internalOnes.length) return Math.max(...internalOnes.map((c) => c.value));
+  const eligible = candidates.filter((c) => !c.excluded);
+  return eligible.length ? Math.max(...eligible.map((c) => c.value)) : null;
+}
 
 let workerPromise = null;
 
@@ -84,25 +110,48 @@ function getWorker() {
 // be smaller than a sub-area also stated on the same floorplan, so the
 // largest is taken.
 function extractStatedSqFt(text) {
-  const candidates = [];
+  const matches = [];
   let match;
   SQFT_RE.lastIndex = 0; // stateful (global) regex - reset before each use
   while ((match = SQFT_RE.exec(text)) !== null) {
     const value = Number(match[1].replace(/,/g, ''));
     if (!Number.isFinite(value) || value < MIN_PLAUSIBLE_SQFT || value > MAX_PLAUSIBLE_SQFT) continue;
-    const blockStart = text.lastIndexOf('\n\n', match.index - 1);
-    const contextStart = Math.max(0, blockStart + 2, match.index - LABEL_LOOKBACK_CHARS);
-    const context = text.slice(contextStart, match.index);
-    candidates.push({
-      value,
-      internal: INTERNAL_AREA_RE.test(context),
-      excluded: EXTERNAL_AREA_RE.test(context) || SEPARATE_STRUCTURE_RE.test(context),
-    });
+    matches.push({ value, context: contextFor(text, match.index) });
   }
-  const internalOnes = candidates.filter((c) => c.internal);
-  if (internalOnes.length) return Math.max(...internalOnes.map((c) => c.value));
-  const eligible = candidates.filter((c) => !c.excluded);
-  return eligible.length ? Math.max(...eligible.map((c) => c.value)) : null;
+  return pickBestTotal(matches);
+}
+
+// Newer, EPC-derived floorplans often print only a metric total - no sq ft
+// conversion anywhere on the image at all (verified against several real
+// floorplans reading "71m?", "Total: 56 m2" and "Total Area: 75.0 m?" -
+// Tesseract misreads the "²" the same way here as it does for sq ft).
+// Only trusts a number with an m²-style unit actually attached to it -
+// unlike extractStatedSqFt above, there's no bare-number label-anchored
+// fallback here: tried one (any number following a "gross internal area"/
+// "total" label), but it produced a real false positive in testing - a
+// floorplan whose sq ft total was itself unreadable ("APPROXIMATE GROSS
+// INTERNAL FLOOR AREA £08 5Q FT / 75 QM", both units mangled) had the
+// fallback grab "08" (part of the ruined sq ft figure sitting closer to
+// the label) instead of "75" (the correct, but more distant, sqm figure).
+// With no way to confirm which unit a bare number was even in, it's safer
+// to find nothing here than to risk repeating that.
+const SQM_UNIT_RE = /(\d[\d,]{0,4}(?:\.\d+)?)\s*(?:sq\.?\s*m\b|m2\b|m²|m\?)/gi;
+
+function sqmToSqFt(sqm) {
+  const sqft = Math.round(sqm * SQM_TO_SQFT);
+  return sqft >= MIN_PLAUSIBLE_SQFT && sqft <= MAX_PLAUSIBLE_SQFT ? sqft : null;
+}
+
+function extractStatedSqMTotal(text) {
+  const matches = [];
+  let match;
+  SQM_UNIT_RE.lastIndex = 0;
+  while ((match = SQM_UNIT_RE.exec(text)) !== null) {
+    const sqft = sqmToSqFt(Number(match[1].replace(/,/g, '')));
+    if (sqft === null) continue;
+    matches.push({ value: sqft, context: contextFor(text, match.index) });
+  }
+  return pickBestTotal(matches);
 }
 
 // Fallback for floorplans with no stated total at all (or one too garbled
@@ -117,7 +166,6 @@ function extractStatedSqFt(text) {
 // simply left out of the sum rather than guessed at.
 const ROOM_DIM_RE = /(\d+(?:\.\d+)?)\s*m?\s*x\s*(\d+(?:\.\d+)?)\s*m\b/gi;
 const MIN_ROOMS_FOR_ESTIMATE = 3;
-const SQM_TO_SQFT = 10.7639;
 // Real UK room dimensions essentially never fall outside this range per
 // side. Necessary, not just a nicety: verified against a real garbled OCR
 // read where a decimal point got dropped ("3.55m" -> "355m" - a stray
@@ -184,7 +232,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       const worker = await getWorker();
       const { data } = await worker.recognize(blob);
       const text = data.text || '';
-      const stated = extractStatedSqFt(text);
+      const stated = extractStatedSqFt(text) ?? extractStatedSqMTotal(text);
       const roomSum = stated === null ? estimateSqFtFromRooms(text) : null;
       sendResponse({
         sqft: stated !== null ? stated : roomSum,

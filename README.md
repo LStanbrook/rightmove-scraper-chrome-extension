@@ -36,16 +36,22 @@ everything to an Excel file.
     when there is one, and anything labelled "external" or belonging to a
     separate structure is never used, even as a fallback: reporting either
     as the property's own size would be actively misleading rather than
-    just imprecise, so it's treated the same as finding nothing. If no
+    just imprecise, so it's treated the same as finding nothing. Newer,
+    EPC-derived floorplans often state only a metric total ("71m²", no sq
+    ft conversion anywhere on the image) - that's read and converted too,
+    still counting as a direct total rather than an estimate. If no
     reliable total is stated either, it falls back further to
     summing the individual room dimensions printed on the floorplan (e.g.
     "3.50m x 3.11m" per room) - a rougher estimate (it tends to run a
     little low, since hallways and cupboards aren't always dimensioned),
     so it gets its own separate "Size (rooms sum est., sq ft)" column
     rather than being mixed in with direct reads. Both OCR columns are
-    still used as a fallback for Price per Sq Ft and the "size" ranking,
-    in that order, when "Size" is blank. Adds a few real seconds of
-    processing per listing that needs it.
+    still used as a fallback for Price per Sq Ft and the "size" ranking
+    when "Size" is blank - and take priority over "Size" itself, for
+    those two purposes only, if a re-check found a different figure than
+    the listed one, since that's exactly the situation the re-check
+    exists to catch. Adds a few real seconds of processing per listing
+    that needs it.
   - It also re-checks a listing that already has a size if that size is a
     clear statistical outlier against the rest of the batch (computed
     once per scrape, in log space so it isn't skewed by the natural mix of
