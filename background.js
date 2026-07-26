@@ -411,12 +411,19 @@ async function scrapeOneDetail(tabId, row, detailFields, floorplanStats, attempt
             if (sqft) {
               row.sizeOcrSqFt = sqft;
               floorplanStats.found++;
-            } else if (!floorplanStats.sample && debug) {
+            } else if (!floorplanStats.sample) {
               // One concrete example of what OCR actually read on a "found
               // nothing" listing, captured once per scrape - enough to
               // tell a genuinely blank floorplan apart from OCR silently
-              // reading the wrong/corrupted/placeholder image.
-              floorplanStats.sample = debug;
+              // reading the wrong/corrupted/placeholder image. A missing
+              // debug field here (rather than the expected object) means
+              // the offscreen document is running stale code from before
+              // this diagnostic existed - it can outlive an extension
+              // reload if it was holding an active Worker open, and needs
+              // Chrome fully closed and reopened (or the unpacked
+              // extension removed and re-added) to clear.
+              floorplanStats.sample =
+                debug || { note: 'no debug info in response - offscreen document is likely running stale code; fully close and reopen Chrome, or remove and re-add the unpacked extension' };
             }
           } catch (e) {
             // Grouped into the end-of-scrape summary (by message, with
@@ -526,9 +533,10 @@ async function deepScrapeAll(requestedConcurrency, detailFields) {
       }
       if (floorplanStats.sample) {
         const s = floorplanStats.sample;
-        summary +=
-          ` Sample miss: fetched ${s.blobSize} bytes, decoded as ${s.width}x${s.height}px, ` +
-          `OCR read ${s.textLength} chars: "${s.textPreview}"`;
+        summary += s.note
+          ? ` Sample miss: ${s.note}`
+          : ` Sample miss: fetched ${s.blobSize} bytes, decoded as ${s.width}x${s.height}px, ` +
+            `OCR read ${s.textLength} chars: "${s.textPreview}"`;
       }
       state.log.push(summary);
     }
