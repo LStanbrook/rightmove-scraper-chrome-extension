@@ -27,6 +27,16 @@ function getWorker() {
       corePath: chrome.runtime.getURL('lib/tesseract/tesseract-core-lstm.wasm.js'),
       langPath: chrome.runtime.getURL('lib/tesseract'),
       gzip: true,
+      // Tesseract.js defaults to spawning its worker via a Blob URL
+      // wrapping `importScripts("<workerPath>")`, rather than loading
+      // workerPath directly - found (via a real offscreen-document
+      // DevTools console) to be exactly what a Chrome extension's CSP
+      // blocks: a blob: worker's importScripts() call to a
+      // chrome-extension:// resource is refused, even though a direct
+      // same-origin worker load is allowed. Forcing a direct
+      // `new Worker(workerPath)` instead sidesteps that blob indirection
+      // entirely.
+      workerBlobURL: false,
     });
   }
   return workerPromise;
