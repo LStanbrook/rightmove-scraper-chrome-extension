@@ -400,11 +400,10 @@ async function scrapeOneDetail(tabId, row, detailFields, attempt = 1) {
         } else {
           try {
             const sqft = await ocrFloorplanSqFt(result.floorplanUrl);
-            if (sqft) {
-              row.sizeOcrSqFt = sqft;
-            } else {
-              state.log.push(`Floorplan OCR found no sq ft figure for ${row.url}`);
-            }
+            // No log entry when this comes back empty - a floorplan simply
+            // not stating a total sq ft figure is a normal, expected
+            // outcome, not something worth flagging every time it happens.
+            if (sqft) row.sizeOcrSqFt = sqft;
           } catch (e) {
             state.log.push(`Floorplan size estimate failed for ${row.url}: ${e.message}`);
           }

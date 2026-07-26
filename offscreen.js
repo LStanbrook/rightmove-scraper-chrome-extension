@@ -41,12 +41,38 @@ function extractSqFt(text) {
   return value;
 }
 
+// Fetches the image ourselves (rather than letting Tesseract fetch the URL
+// internally) so its actual pixel dimensions can be sanity-checked first -
+// if the thumbnail-to-full-resolution URL upgrade in background.js didn't
+// land for some reason, OCR would otherwise run silently on a ~300px-wide
+// thumbnail, which is too small to read reliably and just looks like
+// "OCR found nothing" from the outside.
+const MIN_PLAUSIBLE_WIDTH = 400;
+
+async function fetchImage(url) {
+  const resp = await fetch(url);
+  if (!resp.ok) throw new Error(`HTTP ${resp.status} fetching floorplan image`);
+  const blob = await resp.blob();
+  const bitmap = await createImageBitmap(blob);
+  const size = { width: bitmap.width, height: bitmap.height };
+  bitmap.close();
+  return { blob, size };
+}
+
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type !== 'OCR_FLOORPLAN') return false;
   (async () => {
     try {
+      const { blob, size } = await fetchImage(msg.imageUrl);
+      if (size.width < MIN_PLAUSIBLE_WIDTH) {
+        sendResponse({
+          sqft: null,
+          error: `floorplan image is only ${size.width}x${size.height}px - too small to read reliably (expected a full-resolution image, likely got a thumbnail)`,
+        });
+        return;
+      }
       const worker = await getWorker();
-      const { data } = await worker.recognize(msg.imageUrl);
+      const { data } = await worker.recognize(blob);
       sendResponse({ sqft: extractSqFt(data.text || '') });
     } catch (e) {
       sendResponse({ sqft: null, error: e.message });
