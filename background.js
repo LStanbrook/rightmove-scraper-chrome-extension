@@ -352,7 +352,7 @@ function waitForTabComplete(tabId, timeoutMs) {
 // or a previous crash-recovery pass closed it out from under an in-flight
 // runner). Any other failure (bad load, timeout) just fails this one
 // listing without condemning the tab itself.
-async function scrapeOneDetail(tabId, row, detailFields, attempt = 1) {
+async function scrapeOneDetail(tabId, row, detailFields, floorplanStats, attempt = 1) {
   if (!row.url) return true;
   try {
     const loaded = waitForTabComplete(tabId, 25000);
@@ -398,15 +398,20 @@ async function scrapeOneDetail(tabId, row, detailFields, attempt = 1) {
       // never mistaken for Rightmove's own figure - popup.js still uses it
       // as a fallback for ranking/Price per Sq Ft when size is blank.
       if (detailFields.floorplanSize && !row.size) {
+        floorplanStats.eligible++;
         if (!result.floorplanUrl) {
           state.log.push(`No floorplan image found on page for ${row.url}`);
         } else {
           try {
+            floorplanStats.attempted++;
             const sqft = await ocrFloorplanSqFt(result.floorplanUrl);
             // No log entry when this comes back empty - a floorplan simply
             // not stating a total sq ft figure is a normal, expected
             // outcome, not something worth flagging every time it happens.
-            if (sqft) row.sizeOcrSqFt = sqft;
+            if (sqft) {
+              row.sizeOcrSqFt = sqft;
+              floorplanStats.found++;
+            }
           } catch (e) {
             state.log.push(`Floorplan size estimate failed for ${row.url}: ${e.message}`);
           }
@@ -418,7 +423,7 @@ async function scrapeOneDetail(tabId, row, detailFields, attempt = 1) {
     const tabGone = /No tab with id/i.test(e.message);
     if (!tabGone && attempt < 2 && state.running) {
       await sleep(800);
-      return scrapeOneDetail(tabId, row, detailFields, attempt + 1);
+      return scrapeOneDetail(tabId, row, detailFields, floorplanStats, attempt + 1);
     }
     state.log.push(`Detail fetch failed for ${row.url}: ${e.message}`);
     return !tabGone;
@@ -443,6 +448,12 @@ async function deepScrapeAll(requestedConcurrency, detailFields) {
 
   const concurrency = Math.max(1, Math.min(requestedConcurrency || DETAIL_SCRAPE_CONCURRENCY, state.rows.length || 1));
   const pool = [];
+  // eligible: listings missing a size where the floorplan option was on at
+  // all. attempted: of those, how many actually had a floorplan image to
+  // OCR. found: of those, how many produced a sq ft figure. Logged as one
+  // summary line at the end - not so it can be silently on and produce
+  // nothing without any visible sign of that happening.
+  const floorplanStats = { eligible: 0, attempted: 0, found: 0 };
 
   async function saveOpenWindows() {
     await chrome.storage.local.set({ [OPEN_WINDOWS_KEY]: pool.map((p) => p.windowId) }).catch(() => {});
@@ -467,7 +478,7 @@ async function deepScrapeAll(requestedConcurrency, detailFields) {
       while (state.running) {
         const i = next++;
         if (i >= state.rows.length) return;
-        const tabOk = await scrapeOneDetail(entry.tabId, state.rows[i], detailFields);
+        const tabOk = await scrapeOneDetail(entry.tabId, state.rows[i], detailFields, floorplanStats);
         if (!tabOk && state.running) {
           // The tab this runner was using is gone - replace it rather than
           // let every remaining listing on this runner fail the same way.
@@ -492,6 +503,12 @@ async function deepScrapeAll(requestedConcurrency, detailFields) {
     await Promise.all(pool.map((p) => chrome.windows.remove(p.windowId).catch(() => {})));
     await chrome.storage.local.remove(OPEN_WINDOWS_KEY).catch(() => {});
     await closeOffscreenDocument();
+    if (detailFields.floorplanSize) {
+      state.log.push(
+        `Floorplan size estimate: ${floorplanStats.eligible} listing(s) had no size, ` +
+        `${floorplanStats.attempted} had a floorplan to OCR, ${floorplanStats.found} produced a sq ft figure.`
+      );
+    }
   }
 }
 
