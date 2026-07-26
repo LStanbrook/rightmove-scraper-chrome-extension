@@ -128,10 +128,14 @@ everything to an Excel file.
   blank, the selectors may need updating.
 - Only tested against the standard for-sale/to-rent search list view
   (`.../find.html`), not the map view.
-- The floorplan-size OCR was validated against real Rightmove floorplans
-  (the OCR engine itself, run standalone, reads the printed area correctly
-  when one exists) but not against the full in-extension pipeline (the
-  offscreen document + Chrome's OCR message passing) end-to-end in a live
-  browser session. If it doesn't seem to be working, check the offscreen
-  document's console via `chrome://extensions` → "Inspect views" for
-  errors, and report back what they say.
+- Tesseract.js's browser worker defaults to spawning via a Blob URL
+  wrapping `importScripts("<workerPath>")`, rather than loading the
+  worker script directly - which a Chrome extension's CSP blocks (a
+  blob: worker's importScripts() call to a chrome-extension:// resource
+  is refused, even though loading it directly as the worker's own
+  script is allowed). Worked around with `workerBlobURL: false` in
+  `offscreen.js`. If a future Tesseract.js update reintroduces OCR
+  silently finding nothing (no errors, no matches, ever), this is the
+  first thing to check - confirm via the offscreen document's own
+  DevTools console (`chrome://extensions` → "Inspect views:
+  offscreen.html", only available while a scrape is actively running).
