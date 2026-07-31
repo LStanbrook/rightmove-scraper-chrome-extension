@@ -62,7 +62,7 @@
         </li>
       </ul>
     </div>
-    <div class="hint">Drag a slider to 0 to ignore that trait. Distance is greyed out until you enter a "Distance from" postcode above</div>
+    <div class="hint">Distance is greyed out until a "Distance from" postcode is entered above</div>
     <div id="topMatches" class="top-matches hidden"></div>
   </div>
 
@@ -77,11 +77,13 @@
 
   <div class="detail-fields">
     <div class="detail-fields-title">Which details to fetch</div>
-    <label><input type="checkbox" class="detail-field" data-field="tenure" checked /> Tenure</label>
-    <label><input type="checkbox" class="detail-field" data-field="councilTaxBand" checked /> Council Tax Band</label>
-    <label><input type="checkbox" class="detail-field" data-field="epcRating" checked /> EPC Rating</label>
-    <label><input type="checkbox" class="detail-field" data-field="groundRent" checked /> Ground Rent</label>
-    <label><input type="checkbox" class="detail-field" data-field="serviceCharge" checked /> Service Charge</label>
+    <div class="detail-fields-grid">
+      <label><input type="checkbox" class="detail-field" data-field="tenure" checked /> Tenure</label>
+      <label><input type="checkbox" class="detail-field" data-field="councilTaxBand" checked /> Council Tax Band</label>
+      <label><input type="checkbox" class="detail-field" data-field="epcRating" checked /> EPC Rating</label>
+      <label><input type="checkbox" class="detail-field" data-field="groundRent" checked /> Ground Rent</label>
+      <label><input type="checkbox" class="detail-field" data-field="serviceCharge" checked /> Service Charge</label>
+    </div>
     <label class="floorplan-field">
       <input type="checkbox" class="detail-field" data-field="floorplanSize" />
       Estimate size from floorplan when missing or an outlier
