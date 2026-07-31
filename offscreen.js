@@ -93,7 +93,12 @@ function getWorker() {
       // ft" / "742.71 Sq Ft" correctly), and turns a near-total miss into
       // reading 4 of 5 room dimensions on one that otherwise only yielded
       // a single fragment of text.
-      await worker.setParameters({ tessedit_pageseg_mode: Tesseract.PSM.SPARSE_TEXT });
+      // Canvas-exported PNGs (see upscaleIfSmall below) carry no DPI
+      // metadata, so Tesseract's underlying engine auto-estimates one for
+      // every image and logs "Estimating resolution as NNN" to the console
+      // each time - harmless, but noisy. Fixing it to a plausible value
+      // skips that estimation step (and the log line) entirely.
+      await worker.setParameters({ tessedit_pageseg_mode: Tesseract.PSM.SPARSE_TEXT, user_defined_dpi: '300' });
       return worker;
     });
   }
