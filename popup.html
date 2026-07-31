@@ -6,17 +6,27 @@
   <link rel="stylesheet" href="popup.css" />
 </head>
 <body>
-  <h1>Rightmove Bulk Scraper</h1>
-  <div id="status">Open a Rightmove search results page, then come back here.</div>
+  <header class="app-header">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true"></span>
+      <h1>Rightmove Bulk Scraper</h1>
+    </div>
+    <div id="status">Open a Rightmove search results page, then come back here.</div>
+  </header>
 
-  <label class="ref-location">
-    Distance from:
-    <input type="text" id="refPostcode" placeholder="e.g. BA11 5HT" />
-    <span class="hint">optional - UK postcode. Adds a straight-line distance (km) column</span>
+  <label class="ref-location panel">
+    <div class="panel-row">
+      <span class="panel-label">Distance from</span>
+      <input type="text" id="refPostcode" placeholder="e.g. BA11 5HT" />
+    </div>
+    <span class="hint">Optional UK postcode — adds a straight-line distance (km) column</span>
   </label>
 
-  <div class="score-box">
-    <div class="score-title">Rank by importance <span class="hint">(drag each slider - size shows relative importance)</span></div>
+  <div class="score-box panel">
+    <div class="score-title">
+      Rank by importance
+      <span class="hint">Drag each slider — size shows relative importance</span>
+    </div>
     <div class="weight-panel">
       <div id="weightPie" class="weight-pie" aria-hidden="true"></div>
       <ul id="weightList" class="weight-list">
@@ -52,41 +62,58 @@
         </li>
       </ul>
     </div>
-    <div class="hint">drag a slider to 0 to ignore that trait. Distance is greyed out until you enter a "Distance from" postcode above</div>
+    <div class="hint">Drag a slider to 0 to ignore that trait. Distance is greyed out until you enter a "Distance from" postcode above</div>
     <div id="topMatches" class="top-matches hidden"></div>
   </div>
 
-  <label class="deep-toggle">
-    <input type="checkbox" id="deepToggle" />
-    Fetch full details (tenure, council tax band, EPC, service charge)
-    <span class="hint"> much slower - briefly opens each listing in a hidden window</span>
+  <label class="deep-toggle panel">
+    <input type="checkbox" id="deepToggle" class="switch-input" />
+    <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
+    <span class="switch-text">
+      Fetch full details
+      <span class="hint">Tenure, council tax band, EPC, service charge — much slower, briefly opens each listing in a hidden window</span>
+    </span>
   </label>
 
   <div class="detail-fields">
-    <div class="detail-fields-title">Which details to fetch:</div>
+    <div class="detail-fields-title">Which details to fetch</div>
     <label><input type="checkbox" class="detail-field" data-field="tenure" checked /> Tenure</label>
     <label><input type="checkbox" class="detail-field" data-field="councilTaxBand" checked /> Council Tax Band</label>
     <label><input type="checkbox" class="detail-field" data-field="epcRating" checked /> EPC Rating</label>
     <label><input type="checkbox" class="detail-field" data-field="groundRent" checked /> Ground Rent</label>
     <label><input type="checkbox" class="detail-field" data-field="serviceCharge" checked /> Service Charge</label>
-    <label>
+    <label class="floorplan-field">
       <input type="checkbox" class="detail-field" data-field="floorplanSize" />
       Estimate size from floorplan when missing or an outlier
-      <span class="hint">experimental - reads the floorplan image with OCR, adds a few seconds per listing, and isn't always accurate. Also double-checks listings whose listed size looks like a data-entry error. Estimates go in their own "Size (OCR est.)" column, never overwriting Rightmove's own figure</span>
+      <span class="hint">Experimental — reads the floorplan image with OCR, adds a few seconds per listing, and isn't always accurate. Also double-checks listings whose listed size looks like a data-entry error. Estimates go in their own "Size (OCR est.)" column, never overwriting Rightmove's own figure</span>
     </label>
   </div>
 
-  <label class="concurrency-row">
-    Parallel windows:
-    <input type="number" id="concurrencyInput" min="1" max="10" value="4" />
-    <span class="hint">lower this if Chrome becomes sluggish or unresponsive</span>
+  <label class="concurrency-row panel">
+    <div class="panel-row">
+      <span class="panel-label">Parallel windows</span>
+      <input type="number" id="concurrencyInput" min="1" max="10" value="4" />
+    </div>
+    <span class="hint">Lower this if Chrome becomes sluggish or unresponsive</span>
   </label>
 
   <div class="buttons">
-    <button id="startBtn">Scrape all pages</button>
-    <button id="stopBtn" disabled>Stop</button>
-    <button id="downloadBtn" disabled>Download Excel</button>
-    <button id="openTopBtn" disabled>Open Top 10</button>
+    <button id="startBtn" class="btn btn-primary">
+      <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+      Scrape all pages
+    </button>
+    <button id="stopBtn" class="btn btn-outline" disabled>
+      <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="2"></rect></svg>
+      Stop
+    </button>
+    <button id="downloadBtn" class="btn btn-secondary" disabled>
+      <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+      Download Excel
+    </button>
+    <button id="openTopBtn" class="btn btn-tertiary" disabled>
+      <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
+      Open Top 10
+    </button>
   </div>
 
   <div id="progressWrap" class="hidden">

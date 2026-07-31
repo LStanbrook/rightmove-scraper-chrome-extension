@@ -248,9 +248,9 @@ const RANK_METRICS = {
 };
 const METRIC_ORDER = ['distanceKm', 'size', 'price', 'bedrooms', 'bathrooms'];
 const METRIC_COLORS = {
-  price: '#00805e',
-  bedrooms: '#1a4fbb',
-  bathrooms: '#7a3ec7',
+  price: '#059669',
+  bedrooms: '#4f46e5',
+  bathrooms: '#7c3aed',
   size: '#d97706',
   distanceKm: '#dc2626',
 };
