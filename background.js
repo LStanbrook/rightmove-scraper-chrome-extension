@@ -84,7 +84,7 @@ async function restoreSavedRows() {
       state.channel = saved.channel || '';
       state.resultCount = saved.resultCount || 0;
       state.phase = 'done';
-      state.note = "Recovered from a previous run that didn't finish cleanly - showing what was scraped before it stopped.";
+      state.note = 'Recovered from an interrupted previous run.';
     }
   } catch (e) {
     // ignore
