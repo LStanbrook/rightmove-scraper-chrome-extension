@@ -148,6 +148,22 @@ const SQM_UNIT_RE = /(\d[\d,]{0,4}(?:\.\d+)?)[ \t]*\n?[ \t]*(?:sq\.?\s*m\b|m2\b|
 // "gross internal area"/"total" weren't: it's the unit itself, not a
 // generic label that could be sitting next to either unit's figure.
 const SQM_LABEL_RE = /sq\.?\s*m\b\D{0,20}?(\d[\d,]{0,4}(?:\.\d+)?)/i;
+// A UK floorplan's overall total is conventionally given to one decimal
+// place ("50.9 m²"), and Tesseract dropping that specific character is a
+// real, recurring failure - verified against two separate real floorplans
+// where "50.9" and "73.7" both came out as plain "509" and "737". Reporting
+// either literally (as ~5479 or ~793 sq ft rather than the correct ~548 or
+// ~793) is exactly the kind of confidently-wrong number this file otherwise
+// goes out of its way to avoid, so a 3-digit whole-number reading too big
+// for an un-rounded total to plausibly need is instead reinterpreted with
+// the decimal restored one digit from the end.
+const NO_DECIMAL_MAX_SQM = 200;
+
+function recoverSqm(raw) {
+  const value = Number(raw);
+  if (raw.includes('.') || raw.length !== 3 || value <= NO_DECIMAL_MAX_SQM) return value;
+  return value / 10;
+}
 
 function sqmToSqFt(sqm) {
   const sqft = Math.round(sqm * SQM_TO_SQFT);
@@ -159,14 +175,14 @@ function extractStatedSqMTotal(text) {
   let match;
   SQM_UNIT_RE.lastIndex = 0;
   while ((match = SQM_UNIT_RE.exec(text)) !== null) {
-    const sqft = sqmToSqFt(Number(match[1].replace(/,/g, '')));
+    const sqft = sqmToSqFt(recoverSqm(match[1].replace(/,/g, '')));
     if (sqft === null) continue;
     matches.push({ value: sqft, context: contextFor(text, match.index) });
   }
   const best = pickBestTotal(matches);
   if (best !== null) return best;
   const labelMatch = text.match(SQM_LABEL_RE);
-  return labelMatch ? sqmToSqFt(Number(labelMatch[1].replace(/,/g, ''))) : null;
+  return labelMatch ? sqmToSqFt(recoverSqm(labelMatch[1].replace(/,/g, ''))) : null;
 }
 
 // Fallback for floorplans with no stated total at all (or one too garbled
@@ -185,7 +201,11 @@ function extractStatedSqMTotal(text) {
 // this floorplan's feet-inches pairing OCRs as glued whole-number inches
 // ("128\"x 105\"") with no decimal point anywhere, so requiring one is
 // enough to keep the two apart without relying on the unit letter at all.
-const ROOM_DIM_RE = /(\d+(?:\.\d+)?)(m)?\s*x\s*(\d+(?:\.\d+)?)(m)?\b/gi;
+// The separator also tolerates a stray "/" next to the "x" (verified
+// against a real floorplan reading "2.25m x/1.10m" - Tesseract sometimes
+// picks up a fragment of the nearby feet-inches reading's punctuation),
+// as long as an actual "x" is still present.
+const ROOM_DIM_RE = /(\d+(?:\.\d+)?)(m)?[ \t/]*x[ \t/]*(\d+(?:\.\d+)?)(m)?\b/gi;
 const MIN_ROOMS_FOR_ESTIMATE = 3;
 // Real UK room dimensions essentially never fall outside this range per
 // side. Necessary, not just a nicety: verified against a real garbled OCR
@@ -199,6 +219,24 @@ const MIN_ROOM_DIM_M = 0.5;
 const MAX_ROOM_DIM_M = 15;
 const MAX_ROOM_AREA_SQM = 100;
 
+// Room dimensions are conventionally given to two decimal places
+// ("3.78m"), and losing that decimal is the single biggest reason real
+// floorplans with clearly-printed dimensions still produce no estimate:
+// verified against two real floorplans where 5 of 7 rooms and 4 of 6 rooms
+// respectively lost their decimal on one side ("4.58" -> "458" etc.),
+// dropping the whole floorplan below the 3-room minimum even though every
+// room was legible on the image itself. A 3-digit whole-number reading
+// that's implausible as-is is reinterpreted with the decimal restored two
+// digits from the end (matching that two-decimal-place convention) if
+// doing so lands it back in a plausible range - checked empirically
+// against both floorplans' true dimensions and correct in every case.
+function recoverRoomDim(str) {
+  const value = Number(str);
+  if (str.includes('.') || value <= MAX_ROOM_DIM_M || str.length !== 3) return value;
+  const shifted = value / 100;
+  return shifted >= MIN_ROOM_DIM_M ? shifted : value;
+}
+
 function estimateSqFtFromRooms(text) {
   let totalSqM = 0;
   let roomCount = 0;
@@ -209,8 +247,8 @@ function estimateSqFtFromRooms(text) {
     const bStr = match[3];
     const hasUnit = match[2] != null || match[4] != null;
     if (!hasUnit && !(aStr.includes('.') && bStr.includes('.'))) continue;
-    const a = Number(aStr);
-    const b = Number(bStr);
+    const a = recoverRoomDim(aStr);
+    const b = recoverRoomDim(bStr);
     if (!Number.isFinite(a) || !Number.isFinite(b)) continue;
     if (a < MIN_ROOM_DIM_M || a > MAX_ROOM_DIM_M || b < MIN_ROOM_DIM_M || b > MAX_ROOM_DIM_M) continue;
     const area = a * b;

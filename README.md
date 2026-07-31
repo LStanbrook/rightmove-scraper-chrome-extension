@@ -45,13 +45,19 @@ everything to an Excel file.
     particularly for new-build developments, never provide a larger one)
     are upscaled before OCR - verified against a real 370px-wide floorplan
     whose size table was unreadable at native resolution but came through
-    correctly once upscaled. If no reliable total is stated either, it
-    falls back further to summing the individual room dimensions printed
-    on the floorplan (e.g. "3.50m x 3.11m" per room) - a rougher estimate
-    (it tends to run a little low, since hallways and cupboards aren't
-    always dimensioned), so it gets its own separate "Size (rooms sum
-    est., sq ft)" column rather than being mixed in with direct reads.
-    Both OCR columns are
+    correctly once upscaled. OCR fairly often drops the decimal point from
+    a small area figure ("50.9" read as "509") - since the underlying
+    convention (one decimal place for a total, two for a room dimension)
+    is consistent, an implausible whole-number reading is reinterpreted
+    with the decimal restored rather than trusted or discarded outright,
+    which avoids both reporting a confidently wrong, ~10x-too-large number
+    and losing a room's dimensions to the fallback below entirely. If no
+    reliable total is stated either, it falls back further to summing the
+    individual room dimensions printed on the floorplan (e.g. "3.50m x
+    3.11m" per room) - a rougher estimate (it tends to run a little low,
+    since hallways and cupboards aren't always dimensioned), so it gets
+    its own separate "Size (rooms sum est., sq ft)" column rather than
+    being mixed in with direct reads. Both OCR columns are
     still used as a fallback for Price per Sq Ft and the "size" ranking
     when "Size" is blank - and take priority over "Size" itself, for
     those two purposes only, if a re-check found a different figure than
