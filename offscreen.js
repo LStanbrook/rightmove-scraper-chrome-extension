@@ -15,8 +15,13 @@
 // out with a decimal. Tesseract also reliably misreads the "²" as "?", and
 // (verified against real floorplans reading "806 SQ FT" as "£08 5Q FT" and
 // "94 sq ft" as "94 5q ft") sometimes misreads the "S" in "SQ" as a "5" -
-// both accepted as equivalent markers.
-const SQFT_RE = /(\d[\d,]{0,6}(?:\.\d+)?)\s*(?:[s5][qo]\.?\s*ft\b|[s5][qo]\.?\s*feet\b|ft\.?\s*[²2?])/gi;
+// both accepted as equivalent markers. The gap between the number and its
+// unit allows at most one line break, not a full blank-line block gap -
+// necessary, not just tidy: verified against a real table-style floorplan
+// where a plain \s* wrongly bridged "73.7" (actually its sq.m figure) all
+// the way down to an unrelated "sq.ft" label two blocks later, belonging
+// to a different, unreadable number.
+const SQFT_RE = /(\d[\d,]{0,6}(?:\.\d+)?)[ \t]*\n?[ \t]*(?:[s5][qo]\.?\s*ft\b|[s5][qo]\.?\s*feet\b|ft\.?\s*[²2?])/gi;
 const MIN_PLAUSIBLE_SQFT = 50;
 const MAX_PLAUSIBLE_SQFT = 20000;
 const SQM_TO_SQFT = 10.7639;
@@ -126,16 +131,23 @@ function extractStatedSqFt(text) {
 // floorplans reading "71m?", "Total: 56 m2" and "Total Area: 75.0 m?" -
 // Tesseract misreads the "²" the same way here as it does for sq ft).
 // Only trusts a number with an m²-style unit actually attached to it -
-// unlike extractStatedSqFt above, there's no bare-number label-anchored
-// fallback here: tried one (any number following a "gross internal area"/
-// "total" label), but it produced a real false positive in testing - a
-// floorplan whose sq ft total was itself unreadable ("APPROXIMATE GROSS
-// INTERNAL FLOOR AREA £08 5Q FT / 75 QM", both units mangled) had the
-// fallback grab "08" (part of the ruined sq ft figure sitting closer to
-// the label) instead of "75" (the correct, but more distant, sqm figure).
-// With no way to confirm which unit a bare number was even in, it's safer
-// to find nothing here than to risk repeating that.
-const SQM_UNIT_RE = /(\d[\d,]{0,4}(?:\.\d+)?)\s*(?:sq\.?\s*m\b|m2\b|m²|m\?)/gi;
+// a bare-number label-anchored fallback was tried here too (any number
+// following a "gross internal area"/"total" label), but it produced a
+// real false positive in testing - a floorplan whose sq ft total was
+// itself unreadable ("APPROXIMATE GROSS INTERNAL FLOOR AREA £08 5Q FT /
+// 75 QM", both units mangled) had the fallback grab "08" (part of the
+// ruined sq ft figure sitting closer to the label) instead of "75" (the
+// correct, but more distant, sqm figure) - that label alone can't say
+// which unit a nearby bare number is even in. Same line-break cap between
+// number and unit as SQFT_RE above, for the same reason.
+const SQM_UNIT_RE = /(\d[\d,]{0,4}(?:\.\d+)?)[ \t]*\n?[ \t]*(?:sq\.?\s*m\b|m2\b|m²|m\?)/gi;
+// A narrower table-style layout instead puts the "sq.m" label on its own
+// line, with the value following after (verified against a real
+// new-build-style floorplan reading "sq.m\n\n73.7\n\nsq.ft\n\nM3" - the sq
+// ft figure itself is unrecoverable, but "sq.m" is safe to anchor on where
+// "gross internal area"/"total" weren't: it's the unit itself, not a
+// generic label that could be sitting next to either unit's figure.
+const SQM_LABEL_RE = /sq\.?\s*m\b\D{0,20}?(\d[\d,]{0,4}(?:\.\d+)?)/i;
 
 function sqmToSqFt(sqm) {
   const sqft = Math.round(sqm * SQM_TO_SQFT);
@@ -151,20 +163,29 @@ function extractStatedSqMTotal(text) {
     if (sqft === null) continue;
     matches.push({ value: sqft, context: contextFor(text, match.index) });
   }
-  return pickBestTotal(matches);
+  const best = pickBestTotal(matches);
+  if (best !== null) return best;
+  const labelMatch = text.match(SQM_LABEL_RE);
+  return labelMatch ? sqmToSqFt(Number(labelMatch[1].replace(/,/g, ''))) : null;
 }
 
 // Fallback for floorplans with no stated total at all (or one too garbled
 // to read - e.g. "SQ FT" misread as "OFT", losing both unit letters):
 // individual room dimensions like "3.50m x 3.11m" are usually still
 // legible even then, so sum their areas for a rough estimate instead.
-// Deliberately only matches the metric pairing (requires a literal "m"),
-// even though many floorplans also print the same room in feet/inches
-// ("13'1" x 16'0"") right next to it - matching both would double-count
-// every room. This tends to run a bit low rather than high: hallways and
-// storage cupboards aren't always given their own dimensions, so are
-// simply left out of the sum rather than guessed at.
-const ROOM_DIM_RE = /(\d+(?:\.\d+)?)\s*m?\s*x\s*(\d+(?:\.\d+)?)\s*m\b/gi;
+// Deliberately targets only the metric pairing, even though many
+// floorplans also print the same room in feet/inches ("13'1" x 16'0"")
+// right next to it - matching both would double-count every room. The
+// literal "m" unit is captured but not required on either side: it's
+// common for OCR to drop it from one or both numbers (verified against a
+// real floorplan reading "7.95x3.80m", "271 1.98m" and "1287 105\"" for its
+// three rooms - only the first kept its unit letter). A pair with no unit
+// at all is still accepted, but only when BOTH numbers are decimals - genuine
+// metric readings are always written with a decimal point ("3.78m"), while
+// this floorplan's feet-inches pairing OCRs as glued whole-number inches
+// ("128\"x 105\"") with no decimal point anywhere, so requiring one is
+// enough to keep the two apart without relying on the unit letter at all.
+const ROOM_DIM_RE = /(\d+(?:\.\d+)?)(m)?\s*x\s*(\d+(?:\.\d+)?)(m)?\b/gi;
 const MIN_ROOMS_FOR_ESTIMATE = 3;
 // Real UK room dimensions essentially never fall outside this range per
 // side. Necessary, not just a nicety: verified against a real garbled OCR
@@ -184,8 +205,12 @@ function estimateSqFtFromRooms(text) {
   let match;
   ROOM_DIM_RE.lastIndex = 0; // stateful (global) regex - reset before each use
   while ((match = ROOM_DIM_RE.exec(text)) !== null) {
-    const a = Number(match[1]);
-    const b = Number(match[2]);
+    const aStr = match[1];
+    const bStr = match[3];
+    const hasUnit = match[2] != null || match[4] != null;
+    if (!hasUnit && !(aStr.includes('.') && bStr.includes('.'))) continue;
+    const a = Number(aStr);
+    const b = Number(bStr);
     if (!Number.isFinite(a) || !Number.isFinite(b)) continue;
     if (a < MIN_ROOM_DIM_M || a > MAX_ROOM_DIM_M || b < MIN_ROOM_DIM_M || b > MAX_ROOM_DIM_M) continue;
     const area = a * b;
@@ -204,8 +229,35 @@ function estimateSqFtFromRooms(text) {
 // if the thumbnail-to-full-resolution URL upgrade in background.js didn't
 // land for some reason, OCR would otherwise run silently on a ~300px-wide
 // thumbnail, which is too small to read reliably and just looks like
-// "OCR found nothing" from the outside.
-const MIN_PLAUSIBLE_WIDTH = 400;
+// "OCR found nothing" from the outside. Below this, it's not a genuine
+// full-resolution floorplan at all - just abandoned rather than upscaled.
+const MIN_PLAUSIBLE_WIDTH = 100;
+// Some real floorplans (particularly newer, stylised new-build templates)
+// simply don't have a larger source image available at all - Rightmove
+// itself only ever serves the small one. Verified against a real 370px-
+// wide example whose small size table read as pure noise at native
+// resolution, but came through cleanly (correctly keeping the decimal
+// point in "73.7") once upscaled 4x to ~1480px - 3x wasn't quite enough
+// and still lost the decimal. Already-large floorplans are left alone:
+// this only kicks in below the target width, so the common case pays no
+// extra OCR time for it.
+const TARGET_OCR_WIDTH = 1500;
+const MAX_UPSCALE = 4;
+
+async function upscaleIfSmall(blob, size) {
+  if (size.width >= TARGET_OCR_WIDTH) return blob;
+  const scale = Math.min(MAX_UPSCALE, Math.ceil(TARGET_OCR_WIDTH / size.width));
+  const bitmap = await createImageBitmap(blob);
+  const canvas = document.createElement('canvas');
+  canvas.width = size.width * scale;
+  canvas.height = size.height * scale;
+  const ctx = canvas.getContext('2d');
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  bitmap.close();
+  return new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
+}
 
 async function fetchImage(url) {
   const resp = await fetch(url);
@@ -225,12 +277,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       if (size.width < MIN_PLAUSIBLE_WIDTH) {
         sendResponse({
           sqft: null,
-          error: `floorplan image is only ${size.width}x${size.height}px - too small to read reliably (expected a full-resolution image, likely got a thumbnail)`,
+          error: `floorplan image is only ${size.width}x${size.height}px - too small to be a real floorplan (likely a broken or placeholder image)`,
         });
         return;
       }
+      const ocrBlob = await upscaleIfSmall(blob, size);
       const worker = await getWorker();
-      const { data } = await worker.recognize(blob);
+      const { data } = await worker.recognize(ocrBlob);
       const text = data.text || '';
       const stated = extractStatedSqFt(text) ?? extractStatedSqMTotal(text);
       const roomSum = stated === null ? estimateSqFtFromRooms(text) : null;
