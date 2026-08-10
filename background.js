@@ -603,10 +603,12 @@ async function deepScrapeAll(requestedConcurrency, detailFields) {
     await chrome.storage.local.remove(OPEN_WINDOWS_KEY).catch(() => {});
     await closeOffscreenDocument();
     if (detailFields.floorplanSize) {
+      const noSizeAtAll = floorplanStats.eligible - floorplanStats.outlierChecks;
       let summary =
-        `Floorplan size estimate: ${floorplanStats.eligible} listing(s) needed a check ` +
-        `(${floorplanStats.outlierChecks} for having a listed size that looked like an outlier), ` +
-        `${floorplanStats.attempted} had a floorplan to OCR, ${floorplanStats.found} produced a sq ft figure ` +
+        `Floorplan size estimate: ${floorplanStats.eligible} listing(s) needed a check - ` +
+        `${noSizeAtAll} had no size listed at all, ${floorplanStats.outlierChecks} had a listed size ` +
+        `that looked like an outlier. ${floorplanStats.attempted} had a floorplan to OCR, ` +
+        `${floorplanStats.found} produced a sq ft figure ` +
         `(${floorplanStats.foundRoomSum} of those from summing room dimensions rather than a stated total).`;
       const errorEntries = Object.entries(floorplanStats.errors);
       if (errorEntries.length) {
