@@ -43,9 +43,13 @@ everything to an Excel file.
     side) - that's read and converted too, still counting as a direct
     total rather than an estimate. Smaller floorplan images (some agents,
     particularly for new-build developments, never provide a larger one)
-    are upscaled before OCR - verified against a real 370px-wide floorplan
-    whose size table was unreadable at native resolution but came through
-    correctly once upscaled. OCR fairly often drops the decimal point from
+    are also OCR'd upscaled, alongside the original - verified against a
+    real 370px-wide floorplan whose size table was unreadable at native
+    resolution but came through correctly once upscaled, and separately
+    against a real ~1200px floorplan where upscaling had the opposite
+    effect, blurring an already-clean read just enough to lose it - so
+    neither resolution is preferred outright; whichever pass actually
+    finds a real total wins. OCR fairly often drops the decimal point from
     a small area figure ("50.9" read as "509") - since the underlying
     convention (one decimal place for a total, two for a room dimension)
     is consistent, an implausible whole-number reading is reinterpreted

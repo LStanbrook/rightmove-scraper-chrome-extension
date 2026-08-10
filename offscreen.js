@@ -151,8 +151,16 @@ const SQM_UNIT_RE = /(\d[\d,]{0,4}(?:\.\d+)?)[ \t]*\n?[ \t]*(?:sq\.?\s*m\b|m2\b|
 // new-build-style floorplan reading "sq.m\n\n73.7\n\nsq.ft\n\nM3" - the sq
 // ft figure itself is unrecoverable, but "sq.m" is safe to anchor on where
 // "gross internal area"/"total" weren't: it's the unit itself, not a
-// generic label that could be sitting next to either unit's figure.
-const SQM_LABEL_RE = /sq\.?\s*m\b\D{0,20}?(\d[\d,]{0,4}(?:\.\d+)?)/i;
+// generic label that could be sitting next to either unit's figure. Even
+// so, this produced its own real false positive: a floorplan whose actual
+// total was entirely unreadable ("471 sq[garbled]... Sue sqm") had the
+// wide 20-char lookahead skip clean past several room labels and grab an
+// unrelated "11" from the next room's "11'3" imperial dimension, reporting
+// it as 11 sqm (118 sq ft) instead of finding nothing. Tightened to 8
+// chars - comfortably more than the 2-char gap the real working case
+// needs - and rejects a number immediately followed by a foot-mark, since
+// that's specifically what a room's imperial width/length looks like.
+const SQM_LABEL_RE = /sq\.?\s*m\b\D{0,8}?(\d[\d,]{0,4}(?:\.\d+)?)(?!['’])/i;
 // A UK floorplan's overall total is conventionally given to one decimal
 // place ("50.9 m²"), and Tesseract dropping that specific character is a
 // real, recurring failure - verified against two separate real floorplans
@@ -324,19 +332,49 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         });
         return;
       }
-      const ocrBlob = await upscaleIfSmall(blob, size);
       const worker = await getWorker();
-      const { data } = await worker.recognize(ocrBlob);
-      const text = data.text || '';
-      const stated = extractStatedSqFt(text) ?? extractStatedSqMTotal(text);
-      const roomSum = stated === null ? estimateSqFtFromRooms(text) : null;
+      const { data: nativeData } = await worker.recognize(blob);
+      const nativeText = nativeData.text || '';
+      // Upscaling helps genuinely small images, but was found (via a real
+      // floorplan already a comfortable 1200px wide) to sometimes blur an
+      // already-readable image just enough to break it - it read a clean
+      // "471 sq ft" at native resolution but lost the figure entirely once
+      // upscaled. So native resolution is always tried too, not skipped in
+      // favour of upscaling.
+      let upscaledText = null;
+      if (size.width < TARGET_OCR_WIDTH) {
+        const ocrBlob = await upscaleIfSmall(blob, size);
+        const upscaledData = await worker.recognize(ocrBlob);
+        upscaledText = upscaledData.data.text || '';
+      }
+      // For a stated total, the two OCR passes' candidates are merged
+      // (rather than trying one, then only falling back to the other on a
+      // total miss) - checked against two real floorplans where a
+      // low-quality read of one pass "succeeded" by cleanly finding a
+      // smaller, wrong figure (an annex, a per-floor subtotal) while
+      // missing the real total's text entirely, silently masking the
+      // correct answer the other pass would have found. Simply
+      // concatenating both texts lets the existing internal/excluded
+      // candidate logic in extractStatedSqFt/extractStatedSqMTotal weigh
+      // every figure either pass found, exactly as if they'd all appeared
+      // on one longer floorplan.
+      const combinedText = upscaledText !== null ? nativeText + '\n\n' + upscaledText : nativeText;
+      const stated = extractStatedSqFt(combinedText) ?? extractStatedSqMTotal(combinedText);
+      // Room-sum estimates are NOT merged the same way - unlike picking the
+      // best single total, summing rooms from both passes would double-
+      // count every room read at both resolutions. Each pass's own room
+      // reading is tried as a separate, independent attempt instead.
+      const roomSum =
+        stated === null
+          ? (estimateSqFtFromRooms(nativeText) ?? (upscaledText !== null ? estimateSqFtFromRooms(upscaledText) : null))
+          : null;
       sendResponse({
         sqft: stated !== null ? stated : roomSum,
         source: stated !== null ? 'stated' : roomSum !== null ? 'roomSum' : null,
         // Only read by the caller for one sample listing per scrape (see
         // background.js) - lets a "found nothing" outcome be distinguished
         // from "read garbage/blank" without logging this for every listing.
-        debug: { blobSize: blob.size, width: size.width, height: size.height, textLength: text.length, textPreview: text.slice(0, 200) },
+        debug: { blobSize: blob.size, width: size.width, height: size.height, textLength: combinedText.length, textPreview: combinedText.slice(0, 200) },
       });
     } catch (e) {
       sendResponse({ sqft: null, error: e.message });
